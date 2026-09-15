@@ -1,0 +1,5 @@
+.env
+*.pyc
+__pycache__/
+gpc_wheel_bot/gpc_wheel_log.jsonl
+gpc_wheel_bot/gpc_wheel_trades.csv
