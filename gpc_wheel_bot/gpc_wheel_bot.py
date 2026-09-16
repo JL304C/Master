@@ -38,6 +38,7 @@ from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
     MarketOrderRequest,
     GetOptionContractsRequest,
+    GetOrdersRequest,
     ClosePositionRequest,
 )
 from alpaca.trading.enums import (
@@ -46,6 +47,7 @@ from alpaca.trading.enums import (
     OrderType,
     TimeInForce,
     ContractType,
+    QueryOrderStatus,
 )
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockLatestQuoteRequest
@@ -152,6 +154,20 @@ def get_positions():
     return share_qty, cost_basis, option_pos
 
 
+def get_open_option_order():
+    """Returns the first still-open order on one of our underlying's option
+    symbols, or None. Checked before submitting anything -- a pending,
+    unfilled order (common for options market orders, which don't always
+    fill instantly) is not visible in get_all_positions() and must not be
+    mistaken for "no position, safe to sell another one"."""
+    req = GetOrdersRequest(status=QueryOrderStatus.OPEN)
+    orders = trade_client.get_orders(req)
+    for o in orders:
+        if o.symbol.startswith(SYMBOL) and len(o.symbol) > len(SYMBOL) + 6:
+            return o
+    return None
+
+
 def find_contract(right: ContractType, target_strike: float, dte_target: int):
     """Finds the contract closest to target_strike among those expiring
     within a window around dte_target days out."""
@@ -197,7 +213,17 @@ def submit_single_leg(symbol: str, side: OrderSide, qty: int = 1):
 def run():
     price = get_current_price(SYMBOL)
     share_qty, cost_basis, option_pos = get_positions()
-    log({"action": "check", "symbol": SYMBOL, "reason": f"price={price:.2f} shares={share_qty} option={option_pos.symbol if option_pos else None}"})
+    open_order = get_open_option_order()
+    log({"action": "check", "symbol": SYMBOL,
+         "reason": f"price={price:.2f} shares={share_qty} option={option_pos.symbol if option_pos else None} open_order={open_order.symbol if open_order else None}"})
+
+    # ---- A pending order on our option symbol already exists: never stack
+    # another one on top of it. Options market orders don't always fill
+    # instantly, and an unfilled order doesn't show up as a position.
+    if open_order is not None:
+        log({"action": "wait", "symbol": open_order.symbol,
+             "reason": f"order {open_order.id} still open (status={open_order.status}), not submitting a new one"})
+        return
 
     # ---- No shares, no open option: consider selling a new put -----------
     if share_qty == 0 and option_pos is None:
