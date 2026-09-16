@@ -31,7 +31,7 @@ import csv
 import json
 import os
 import sys
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta, date, timezone
 from pathlib import Path
 
 from alpaca.trading.client import TradingClient
@@ -95,7 +95,7 @@ data_client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
 
 
 def log(event: dict) -> None:
-    event = {"ts": datetime.utcnow().isoformat(), **event}
+    event = {"ts": datetime.now(timezone.utc).isoformat(), **event}
     with LOG_JSONL.open("a") as fh:
         fh.write(json.dumps(event) + "\n")
     is_new = not LOG_CSV.exists()
@@ -171,10 +171,13 @@ def find_contract(right: ContractType, target_strike: float, dte_target: int):
     if not contracts:
         return None
     # pick the contract with strike closest to target, then expiration
-    # closest to the target DTE
+    # closest to the target DTE. alpaca-py has returned expiration_date as
+    # either a str or a date depending on SDK version -- handle both.
     def score(c):
+        exp = c.expiration_date
+        exp = exp if isinstance(exp, date) else datetime.strptime(exp, "%Y-%m-%d").date()
         strike_diff = abs(float(c.strike_price) - target_strike)
-        exp_diff = abs((datetime.strptime(c.expiration_date, "%Y-%m-%d").date() - today).days - dte_target)
+        exp_diff = abs((exp - today).days - dte_target)
         return (strike_diff, exp_diff)
     contracts.sort(key=score)
     return contracts[0]
