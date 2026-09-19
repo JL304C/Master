@@ -31,6 +31,13 @@ feePerContract= input.float(0.65, "Fees, round trip ($/share)", minval=0.0, step
 earn1         = input.time(timestamp("2026-08-26 00:00 +0000"), "Earnings date 1 (blackout week)")
 earn2         = input.time(timestamp("2026-11-18 00:00 +0000"), "Earnings date 2 (blackout week)")
 earn3         = input.time(timestamp("1970-01-01 00:00 +0000"), "Earnings date 3 (optional, leave default = off)")
+startDate     = input.time(timestamp("2023-01-01 00:00 +0000"), "Backtest start date")
+// No entries before this date. Matters because `width` is a fixed dollar
+// amount: at NVDA's current ~$220 that's a sensible ~20-25% of premium, but
+// decades ago at a far lower split-adjusted price/vol regime the same fixed
+// $10 stops being comparable -- restricting the window keeps every trade in
+// a price/vol regime roughly like today's, instead of averaging across eras
+// that aren't really the same instrument in relative terms.
 
 // ---------- Black-Scholes (Hastings approximation for N(x), no erf in Pine) ----------
 f_normcdf(x) =>
@@ -93,9 +100,8 @@ var float entryS       = na
 var int   totalTrades  = 0
 var int   winTrades    = 0
 var float sumRet       = 0.0
-var float equity       = 1.0
 
-if not inPosition and signal and not blackout and not na(sigma) and sigma > 0
+if not inPosition and signal and not blackout and time >= startDate and not na(sigma) and sigma > 0
     T0 = dteInput / 365.0
     kl = f_findstrike(close, T0, rFree, sigma, targetDelta)
     ks = kl + width
@@ -123,7 +129,6 @@ if inPosition and bar_index > entryBarIdx
         if finalRet > 0
             winTrades := winTrades + 1
         sumRet := sumRet + finalRet
-        equity := equity * (1 + finalRet)
         reason = ret >= profitTarget ? "target" : "expiration"
         label.new(bar_index, high, "EXIT (" + reason + ")\n" + str.tostring(finalRet * 100, "#.#") + "%",
                    style=label.style_label_down,
@@ -148,5 +153,5 @@ if barstate.islast
     table.cell(t, 1, 2, totalTrades > 0 ? str.tostring(winTrades / totalTrades * 100, "#.#") + "%" : "n/a", text_color=color.white)
     table.cell(t, 0, 3, "Mean return/trade", text_color=color.white)
     table.cell(t, 1, 3, totalTrades > 0 ? str.tostring(sumRet / totalTrades * 100, "#.#") + "%" : "n/a", text_color=color.white)
-    table.cell(t, 0, 4, "Compounded equity", text_color=color.white)
-    table.cell(t, 1, 4, str.tostring(equity, "#.###") + "x", text_color=color.white)
+    table.cell(t, 0, 4, "Total return (equal $ risk/trade)", text_color=color.white)
+    table.cell(t, 1, 4, str.tostring(sumRet * 100, "#.#") + "%", text_color=color.white)

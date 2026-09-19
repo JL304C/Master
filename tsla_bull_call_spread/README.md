@@ -134,6 +134,32 @@ problem entirely instead of working around it. Install steps and how to read
 the results are in the chat record; the script itself is the artifact of
 record here.
 
+**First real run (2026-09-19, before a start-date filter existed):** 256
+closed trades, 50.8% win rate, +11% mean return/trade — a real, large sample
+that lands right inside the range the Python Monte Carlo predicted (48–77%
+win rate, -13% to +34% mean depending on regime), which is a good
+cross-check between the two independent approaches. But two problems with
+that first run, both now fixed in the script:
+- With no date filter, Pine ran the signal over TradingView's *entire*
+  available NVDA history (back to ~1999-2001). `width` is a fixed $10
+  amount — a sensible ~20-25% of premium at NVDA's current ~$220, but not
+  comparable decades ago at a far lower split-adjusted price/vol regime. The
+  256-trade aggregate was likely mixing eras that aren't really the same
+  instrument in relative terms. **Fixed**: added a `Backtest start date`
+  input (default 2023-01-01) that gates new entries.
+- The table's "Compounded equity" stat assumed 100%-of-account reinvestment
+  per trade (`equity *= (1 + return)`), so the one trade in that run that
+  hit -100% (a real, correct outcome — the spread expired worthless) sent it
+  to exactly 0 and it stayed there regardless of any winners afterward. Not
+  a strategy failure, a formula artifact — and a real illustration of why
+  "position for zero" means sizing the *debit* as a small slice of the
+  account, never the whole account. **Fixed**: replaced it with a
+  "Total return (equal $ risk/trade)" stat (sum of per-trade returns) that
+  doesn't collapse to zero after one loss.
+
+Re-run with the fixed script and a recent start date to get numbers that are
+actually comparable to trading NVDA today.
+
 ---
 
 ## Audit history
