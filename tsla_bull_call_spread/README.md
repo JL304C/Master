@@ -134,6 +134,42 @@ tickers.
 Full regime-by-regime numbers (strong/moderate/weak bull, flat, bear, vol
 crush, for both profit-taking rules) are in `cross_ticker_output_2026-09-19.txt`.
 
+## Rule refinements: robust entry filter + stop-percentage sweep (run 2026-09-19)
+
+Follow-up request: fix the entry filter's MSFT fragility, and re-test the
+thesis-broken stop as a **percentage of entry price** instead of a flat $10,
+swept across 2%/3%/4%/5%/6%. See `stop_pct_sweep.py` /
+`stop_pct_sweep_output_2026-09-19.txt`.
+
+**Entry filter fix.** Using *trimmed* realized vol (the 100-day sample with
+its single largest-magnitude daily move excluded) instead of raw realized
+vol resolves finding A above directly: MSFT drops to 30.9% and now correctly
+**fails** the 35% floor on a basis that isn't one outlier event, while TSLA
+(46.6%) and NVDA (39.1%) still pass on real, sustained volatility.
+
+**Stop-percentage sweep — the real finding isn't which percentage, it's that
+none of them help.** At every level tested (2% through 6%), for both TSLA
+and NVDA, mean return is *worse* than having no stop at all (e.g. NVDA:
++10.7% no-stop vs +4.2% at the loosest 6% stop tested). The reason is
+structural, not a tuning problem: a bull call spread's maximum loss is
+**already capped at the debit paid**, whatever the stock does. The
+"total_loss_rate" column with no stop (35–37%) isn't unbounded risk, it's
+just "expired worthless" — already the worst case. A price stop, flat-dollar
+or percentage, doesn't lower that floor; it just closes some trades early
+that would have recovered, turning a subset of would-be wins into locked-in
+partial losses. Recommendation: don't use a hard price/percentage stop as a
+*risk*-management tool on this instrument, since the risk is already capped
+by construction — if a stop is used at all, treat it as a *capital-efficiency*
+rule (free up capital/attention from a clearly dead trade) rather than a loss
+preventer, and prefer a technical thesis-invalidation trigger over an
+arbitrary price/percentage level if a real early exit is wanted.
+
+**NVDA vs TSLA, the two survivors.** NVDA has the better numbers on every
+axis: cheaper relative debit (21.5% of width vs TSLA's 23.8%), better
+reward:risk (3.64x vs 3.26x), and the better no-stop mean return/win rate
+(+10.7%/63.9% vs +8.2%/63.1%) — consistent with NVDA clearing the 35%
+signal-quality bar with less of TSLA's extra chop layered on top.
+
 ## Files
 
 - `tsla_bull_call_spread_audit.py` — the original TSLA-only audit: real-data
@@ -145,8 +181,13 @@ crush, for both profit-taking rules) are in `cross_ticker_output_2026-09-19.txt`
 - `data/tsla_daily_2026-09-18.json`, `data/nvda_daily_2026-09-18.json`,
   `data/msft_daily_2026-09-18.json` — raw Alpha Vantage `TIME_SERIES_DAILY`
   responses used for realized-vol calibration (real data, not simulated).
+- `stop_pct_sweep.py` — the rule-refinement follow-up: trimmed-vol entry
+  filter, close-all-@45% only (the recommended default), and a stop
+  swept as a percentage of entry price (none/2%/3%/4%/5%/6%) across the
+  same 6 regimes.
 - `audit_output_2026-09-19.txt` — TSLA-only audit run output.
 - `cross_ticker_output_2026-09-19.txt` — cross-ticker audit run output.
+- `stop_pct_sweep_output_2026-09-19.txt` — stop-percentage sweep run output.
 
 ## Known limitations (disclosed, not hidden)
 

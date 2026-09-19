@@ -1,0 +1,23 @@
+=== Entry filter using TRIMMED realized vol (excludes single largest outlier day) ===
+  TSLA: raw_vol=52.8%  trimmed_vol=46.6%  -> PASS (floor 35%)
+  NVDA: raw_vol=41.2%  trimmed_vol=39.1%  -> PASS (floor 35%)
+  MSFT: raw_vol=38.4%  trimmed_vol=30.9%  -> FAIL (floor 35%)
+
+=== TSLA: S0=$364.27  trimmed_vol=46.6%  long 395C/short 405C  debit=$2.38 (23.8% of width) ===
+        stop   win_rate(6-regime avg)   mean_ret(avg)   total_loss_rate(avg)
+        none                   63.1%          +8.2%                 36.8%
+  2% ($7.29)                   37.2%          -3.9%                  0.8%
+  3% ($10.93)                   41.9%          -3.1%                  1.6%
+  4% ($14.57)                   47.0%          -0.5%                  2.7%
+  5% ($18.21)                   49.5%          -0.6%                  4.3%
+  6% ($21.86)                   53.4%          +1.6%                  6.4%
+
+=== NVDA: S0=$222.27  trimmed_vol=39.1%  long 238C/short 248C  debit=$2.15 (21.5% of width) ===
+        stop   win_rate(6-regime avg)   mean_ret(avg)   total_loss_rate(avg)
+        none                   63.9%         +10.7%                 35.7%
+  2% ($4.45)                   40.9%          -1.8%                  1.6%
+  3% ($6.67)                   45.3%          -1.4%                  3.0%
+  4% ($8.89)                   49.7%          +0.5%                  4.8%
+  5% ($11.11)                   54.2%          +3.4%                  6.5%
+  6% ($13.34)                   56.6%          +4.2%                  8.8%
+
