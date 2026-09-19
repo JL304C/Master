@@ -1,0 +1,63 @@
+S0=364.27  realized_100d_ann_vol=0.528  100d_drift=-0.081 (rejected as a forecast -- see note below)
+Next confirmed earnings: 2026-10-28 -- a binary gap event, independent of any 'bullish signal'
+
+=== SECTION 1: Entry-rule check against TSLA's real price/vol today ===
+ DTE   K_long  K_short delta_long    debit  debit/width  breakeven max_profit  reward:risk  spans_earnings
+  21      393      403      0.302     2.38       23.8%     395.38       7.62        3.20x           False
+  30      400      410      0.301     2.34       23.4%     402.34       7.66        3.26x           False
+  35      404      414      0.299     2.30       23.0%     406.30       7.70        3.34x           False
+  45      410      420      0.302     2.29       22.9%     412.29       7.71        3.36x            True
+  60      420      430      0.299     2.21       22.1%     422.21       7.79        3.53x            True
+
+Reading Section 1: at TSLA's current realized vol (~53% annualized, elevated even for TSLA)
+the 30-delta/10-wide spread actually prices CHEAP relative to the rule's ceiling -- roughly
+22-24% of width across every DTE tested, comfortably under the $2.50 ideal and the $3.00 hard
+cap. That is itself informative: a 10-point-wide spread is a small fraction of TSLA's ~$364
+price and ~53% vol, so the 30-delta strike sits far enough out that the spread never gets
+expensive enough to violate the rule on this name at these levels -- the binding constraint
+for TSLA is the SIGNAL requirement in paragraph 1, not the debit ceiling in paragraph 1's back
+half. (On a lower-vol or lower-priced underlying, a $10-wide spread is a much bigger fraction
+of the same delta's premium and the debit ceiling becomes the binding constraint instead.)
+
+  DTE  21: debit/width 23.8%, reward:risk 3.20x -> PASS
+  DTE  30: debit/width 23.4%, reward:risk 3.26x -> PASS
+  DTE  35: debit/width 23.0%, reward:risk 3.34x -> PASS
+  DTE  45: debit/width 22.9%, reward:risk 3.36x -> PASS  [SPANS EARNINGS 2026-10-28 -- gap risk on a defined-risk spread, still worth flagging]
+  DTE  60: debit/width 22.1%, reward:risk 3.53x -> PASS  [SPANS EARNINGS 2026-10-28 -- gap risk on a defined-risk spread, still worth flagging]
+
+=== SECTION 2: Monte Carlo, management-rule performance across drift regimes ===
+
+Base construction: long 400C / short 410C, 30DTE, net debit $2.34 (23.4% of width)
+
+--- Management rule: close-all @45% ---
+  strong_bull_+60pct           win_rate=73.0%  total_loss_rate=26.9%  mean_ret=+25.9%  median_ret=+56.0%  return_sd=0.80  mean/sd=+0.32
+  moderate_bull_+30pct         win_rate=68.0%  total_loss_rate=32.0%  mean_ret=+16.5%  median_ret=+53.5%  return_sd=0.83  mean/sd=+0.20
+  weak_bull_+12pct             win_rate=65.8%  total_loss_rate=34.2%  mean_ret=+13.0%  median_ret=+51.8%  return_sd=0.85  mean/sd=+0.15
+  flat_0pct                    win_rate=62.4%  total_loss_rate=37.6%  mean_ret= +6.8%  median_ret=+50.7%  return_sd=0.86  mean/sd=+0.08
+  bear_-25pct                  win_rate=61.3%  total_loss_rate=38.8%  mean_ret= +4.1%  median_ret=+50.1%  return_sd=0.85  mean/sd=+0.05
+  vol_crush_+30pct_low_iv      win_rate=49.1%  total_loss_rate=50.5%  mean_ret=-13.3%  median_ret=-100.0%  return_sd=0.91  mean/sd=-0.15
+
+--- Management rule: sell-half @100%, hold rest ---
+  strong_bull_+60pct           win_rate=39.6%  total_loss_rate=39.4%  mean_ret=+39.9%  median_ret= +0.0%  return_sd=1.38  mean/sd=+0.29
+  moderate_bull_+30pct         win_rate=34.1%  total_loss_rate=45.8%  mean_ret=+22.6%  median_ret= +0.0%  return_sd=1.36  mean/sd=+0.17
+  weak_bull_+12pct             win_rate=31.1%  total_loss_rate=47.5%  mean_ret=+14.4%  median_ret= +0.0%  return_sd=1.32  mean/sd=+0.11
+  flat_0pct                    win_rate=26.0%  total_loss_rate=53.0%  mean_ret= -2.8%  median_ret=-100.0%  return_sd=1.25  mean/sd=-0.02
+  bear_-25pct                  win_rate=23.9%  total_loss_rate=54.8%  mean_ret= -7.2%  median_ret=-100.0%  return_sd=1.24  mean/sd=-0.06
+  vol_crush_+30pct_low_iv      win_rate=29.8%  total_loss_rate=57.9%  mean_ret= -1.3%  median_ret=-100.0%  return_sd=1.32  mean/sd=-0.01
+
+=== SECTION 3: sensitivity -- what the entry-debit ceiling actually buys you ===
+ entry_debit  debit/width max_profit  reward:risk  breakeven_vs_S0
+        2.00       20.0%       8.00        4.00x          +37.73  [within rule]
+        2.50       25.0%       7.50        3.00x          +38.23  [within rule]
+        2.75       27.5%       7.25        2.64x          +38.48  [within rule]
+        3.00       30.0%       7.00        2.33x          +38.73  [within rule]
+        3.50       35.0%       6.50        1.86x          +39.23  [VIOLATES rule (>$3.00 cap)]
+        4.00       40.0%       6.00        1.50x          +39.73  [VIOLATES rule (>$3.00 cap)]
+
+Reading Section 3: this is the mechanical reason the rule caps the debit. At $2.50 (the
+ideal ceiling) reward:risk is exactly 3.0x. At $3.00 (the hard ceiling) it's already down
+to 2.33x -- the low end of the stated 2.3-3x band. Above $3.00 the trade no longer meets
+the rule's own risk/reward floor, independent of how good the bullish signal is. Paying
+up for a rich spread (as Section 1 shows the current 30-delta/10-wide TSLA spread tends to
+do at this vol level) is the single most common way this strategy gets violated silently.
+
