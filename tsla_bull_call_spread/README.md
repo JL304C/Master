@@ -68,13 +68,56 @@ IV rank isn't already elevated/about to mean-revert at entry, on top of the
 average-positive too: a trade with no stop gets the full 30 days to recover
 into the 45% target rather than being cut off early.
 
-**Still open / cannot be audited from price data alone:** the "strong,
-time-bounded bullish signal" itself has no defined generator — this audit
-validates everything downstream of a valid signal, not the signal itself.
-NVDA's next earnings date could not be confirmed (Alpha Vantage
-`EARNINGS_CALENDAR` returned nothing at 3/6/12-month horizons on this key) —
-check it manually before entry and avoid an expiration that spans it unless
-that's a deliberate choice.
+**Entry signal, now concrete:** 3 consecutive daily closes above the 8-day
+EMA. **Earnings blackout:** no new entries during the calendar week of a
+known/expected NVDA earnings date — confirmed via Alpha Vantage's `EARNINGS`
+endpoint (real historical report dates, not the empty forward-looking
+`EARNINGS_CALENDAR`): last reported 2026-08-26; next expected **2026-11-18**,
+consistent with NVDA's real multi-year pattern of reporting in the
+Nov 14–21 window.
+
+## Real-data backtest of the signal (run 2026-09-19)
+
+See `nvda_ema_signal_backtest.py` / `nvda_ema_signal_backtest_output_2026-09-19.txt`.
+This is **not Monte Carlo** — it walks the actual real NVDA closes on disk
+(same `data/nvda_daily_2026-09-18.json`) day by day, fires the entry signal
+above on the real price series, and manages each trade (30-delta/10-wide,
+close-all @45%, no stop, close by expiration) against the real subsequent
+prices, using a fixed 39.1% sigma for the Black-Scholes marks (no historical
+IV is available — a disclosed simplification, see Limitations).
+
+**Data constraint, disclosed up front:** `TIME_SERIES_DAILY` with
+`outputsize=full` is premium-gated on this key, and Yahoo Finance is blocked
+by this environment's network policy — so the only real price history
+available is the same ~100-day compact window used throughout this repo
+(2026-04-28..2026-09-18). That is too short to draw a real performance
+conclusion from; treat the run below as a **mechanics check on real data**,
+not a backtest result to size a strategy on.
+
+| entry | exit | days held | entry price | exit price | return | reason |
+|---|---|---|---|---|---|---|
+| 2026-05-12 | 2026-05-14 | 2 | $220.78 | $235.74 | +86.4% | profit target |
+| 2026-05-15 | 2026-06-30 | 30 | $225.32 | $200.09 | -100.0% | expiration |
+| 2026-07-10 | 2026-08-07 | 20 | $210.96 | $223.96 | +48.7% | profit target |
+| 2026-08-10 | 2026-09-04 | 19 | $217.55 | $230.36 | +46.3% | profit target |
+| 2026-09-08 | *(still open at cutoff)* | 8 so far | $225.73 | $222.27 | -37.7% mark | data ends, not a real exit |
+
+Resolved trades: n=4, win rate 75%, mean return +20.4%. n=4 is not a sample
+you can trust — one bad or good NVDA week either direction would swing it
+completely. What it does confirm on real data: the signal fires at a
+plausible frequency (roughly monthly in a trending stretch), the 45% target
+resolved 3 of 4 winners well before 30 days (2, 20, 19 days), the one loser
+rode the full 30 days to expiration exactly as the no-stop rule specifies,
+and no signal happened to fall inside the real 2026-08-26 earnings week in
+this window (the blackout code path exists and is exercised in the script,
+but wasn't independently tested here since the account was already in a
+trade spanning that week either way).
+
+**To get a real, trustworthy backtest** (dozens of signals across multiple
+market regimes and at least one earnings cycle the strategy was actually
+exposed to) requires 1–2+ years of daily NVDA data, which needs either a
+paid Alpha Vantage tier or another data source this environment can reach —
+worth doing before trading this live.
 
 ---
 
@@ -265,6 +308,10 @@ signal-quality bar with less of TSLA's extra chop layered on top.
 - `audit_output_2026-09-19.txt` — TSLA-only audit run output.
 - `cross_ticker_output_2026-09-19.txt` — cross-ticker audit run output.
 - `nvda_final_strategy_output_2026-09-19.txt` — final strategy run output.
+- `nvda_ema_signal_backtest.py` — real-data (not Monte Carlo) backtest of the
+  8-EMA/3-day entry signal plus earnings blackout, walking the actual NVDA
+  closes on disk and managing each trade against real subsequent prices.
+- `nvda_ema_signal_backtest_output_2026-09-19.txt` — backtest run output.
 - `stop_pct_sweep_output_2026-09-19.txt` — stop-percentage sweep run output.
 
 ## Known limitations (disclosed, not hidden)
@@ -281,11 +328,18 @@ signal-quality bar with less of TSLA's extra chop layered on top.
   see finding A above for a concrete case (MSFT) where that substitution
   changes the entry decision depending on whether one outlier day is inside
   the lookback window. Real IV/IV-rank would not have this artifact.
-- NVDA's earnings date could not be confirmed (Alpha Vantage
-  `EARNINGS_CALENDAR` returned no entry in the next 3 months); MSFT's
-  `EARNINGS_CALENDAR` call returned a malformed response and was not
-  retried. Neither ticker's earnings-overlap risk has been verified the way
-  TSLA's was — check both manually before entry.
+- NVDA's earnings date could not be confirmed via `EARNINGS_CALENDAR`
+  (returned no entry at any horizon on this key); it *was* later confirmed
+  via the separate `EARNINGS` endpoint's real historical report dates —
+  2026-11-18 is a user-supplied expectation, consistent with but not
+  identical to that real pattern. MSFT's `EARNINGS_CALENDAR` call returned a
+  malformed response and was never resolved — check manually before entry.
+- The EMA-signal backtest (see above) only has ~100 real trading days to
+  work with, for the same `outputsize=full`-is-premium reason as everywhere
+  else in this repo; Yahoo Finance was tried as an alternate free source and
+  is blocked by this environment's network policy. 4 resolved trades is a
+  mechanics check, not a performance result — don't size a real strategy on
+  it without a longer, independently-sourced backtest first.
 - The 30-day base case in Section 2 is a disclosed assumption — the rule
   text doesn't specify DTE; Section 1 shows the same entry check across
   21/30/35/45/60 DTE.

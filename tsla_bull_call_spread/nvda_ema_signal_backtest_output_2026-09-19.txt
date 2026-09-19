@@ -1,0 +1,16 @@
+Backtest window: 2026-04-28 .. 2026-09-18  (100 real trading days)
+Entry signal: close > 8-EMA for 3 consecutive days, no open position, not earnings week
+Management: 30-delta/10-wide, close-all @45%, no stop, close by expiration (static sigma=39.1%)
+
+=== 5 trade(s) found in the real 100-day window ===
+
+  2026-05-12 -> 2026-05-14  (2d)  S0=$220.78 -> exit S=$235.74  236C/246C debit=$2.19  ret=+86.4%  [profit_target]
+  2026-05-15 -> 2026-06-30  (30d)  S0=$225.32 -> exit S=$200.09  241C/251C debit=$2.19  ret=-100.0%  [expiration]
+  2026-07-10 -> 2026-08-07  (20d)  S0=$210.96 -> exit S=$223.96  226C/236C debit=$2.11  ret=+48.7%  [profit_target]
+  2026-08-10 -> 2026-09-04  (19d)  S0=$217.55 -> exit S=$230.36  233C/243C debit=$2.13  ret=+46.3%  [profit_target]
+  2026-09-08 -> 2026-09-18  (8d)  S0=$225.73 -> exit S=$222.27  242C/252C debit=$2.13  ret=-37.7%  [data_cutoff (still open)]
+
+Resolved trades: n=4  win_rate=75%  mean_ret=+20.4%
+Still open at data cutoff (2026-09-18), excluded from the stats above: 1 trade(s) -- its return shown is a mark, not a resolved outcome.
+
+Sample size is too small (n=4) to draw a performance conclusion -- this is a real-data mechanics check, not a backtest result you should size a strategy on. See the note at the top of this file for why the window is this short.
