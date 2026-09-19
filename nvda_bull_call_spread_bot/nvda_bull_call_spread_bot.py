@@ -89,7 +89,7 @@ from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.requests import (
-    StockLatestQuoteRequest,
+    StockLatestTradeRequest,
     StockBarsRequest,
     OptionLatestQuoteRequest,
 )
@@ -211,9 +211,17 @@ def implied_vol_call(price, S, K, T, r) -> float | None:
 # Market data helpers
 # --------------------------------------------------------------------------- #
 def get_current_price(symbol: str) -> float:
-    req = StockLatestQuoteRequest(symbol_or_symbols=symbol)
-    quote = stock_data_client.get_stock_latest_quote(req)[symbol]
-    return (quote.ask_price + quote.bid_price) / 2.0
+    """Latest TRADE price, not a bid/ask quote midpoint. A quote midpoint
+    breaks badly once the market is closed and one side of the book comes
+    back 0/stale -- e.g. bid=$208, ask=$0 averages to $104, roughly half
+    the real price (this is what happened on the first live run of this
+    bot). Alpaca's own reference notebook for this exact strategy uses the
+    latest trade for the underlying for the same reason -- matching that
+    here rather than gpc_wheel_bot's quote-midpoint convention, which is
+    fine for GPC's actively-quoted shares but not safe for a closed market."""
+    req = StockLatestTradeRequest(symbol_or_symbols=symbol)
+    trade = stock_data_client.get_stock_latest_trade(req)[symbol]
+    return float(trade.price)
 
 
 def get_daily_closes(symbol: str, days: int = 150) -> list[tuple[date, float]]:
