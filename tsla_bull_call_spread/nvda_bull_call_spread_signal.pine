@@ -1,0 +1,152 @@
+//@version=5
+// NVDA Bull Call Spread -- EMA signal backtest (indicator, not strategy)
+//
+// Why an indicator and not a strategy(): TradingView's built-in Strategy
+// Tester computes P&L from the CHARTED symbol's own price times quantity --
+// it has no concept of a synthetic multi-leg derivative. Forcing a debit
+// spread into strategy.entry()/strategy.close() would either misprice it
+// or silently model unlimited-loss directional stock exposure instead of
+// the actual capped-risk spread. This script instead runs its own
+// bar-by-bar Black-Scholes engine (mirrors the Python audit in the repo)
+// and reports results via on-chart labels + a summary table.
+//
+// Entry: 3 consecutive daily closes above the EMA.
+// Construction: ~targetDelta long call, short call `width` points higher,
+// same expiration, dteInput days out.
+// Management: close all at profitTarget return, no stop, close by
+// expiration if the target isn't hit. One position at a time.
+// Blackout: no new entries during the calendar week of an earnings date.
+indicator("NVDA Bull Call Spread - EMA Signal Backtest", overlay=true)
+
+// ---------- Inputs ----------
+emaLen        = input.int(8, "EMA length (signal)", minval=1)
+width         = input.float(10.0, "Spread width ($)", minval=1.0)
+targetDelta   = input.float(0.30, "Long call target delta", minval=0.05, maxval=0.5, step=0.01)
+dteInput      = input.int(30, "Days to expiration (bars)", minval=5)
+profitTarget  = input.float(0.45, "Profit target (fraction of debit)", minval=0.05, step=0.05)
+volLen        = input.int(100, "Realized-vol lookback (bars)", minval=20)
+rFree         = input.float(0.04, "Risk-free rate", minval=0.0, step=0.01)
+slippagePct   = input.float(0.04, "Slippage (fraction of debit)", minval=0.0, step=0.01)
+feePerContract= input.float(0.65, "Fees, round trip ($/share)", minval=0.0, step=0.05)
+earn1         = input.time(timestamp("2026-08-26 00:00 +0000"), "Earnings date 1 (blackout week)")
+earn2         = input.time(timestamp("2026-11-18 00:00 +0000"), "Earnings date 2 (blackout week)")
+earn3         = input.time(timestamp("1970-01-01 00:00 +0000"), "Earnings date 3 (optional, leave default = off)")
+
+// ---------- Black-Scholes (Hastings approximation for N(x), no erf in Pine) ----------
+f_normcdf(x) =>
+    k = 1.0 / (1.0 + 0.2316419 * math.abs(x))
+    poly = k * (0.319381530 + k * (-0.356563782 + k * (1.781477937 + k * (-1.821255978 + k * 1.330274429))))
+    cdf = 1.0 - (1.0 / math.sqrt(2 * math.pi)) * math.exp(-x * x / 2) * poly
+    x >= 0 ? cdf : 1.0 - cdf
+
+f_bscall(S, K, T, r, sigma) =>
+    if T <= 0
+        math.max(0.0, S - K)
+    else
+        d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+        d2 = d1 - sigma * math.sqrt(T)
+        S * f_normcdf(d1) - K * math.exp(-r * T) * f_normcdf(d2)
+
+f_bsdelta(S, K, T, r, sigma) =>
+    if T <= 0
+        S > K ? 1.0 : 0.0
+    else
+        d1 = (math.log(S / K) + (r + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+        f_normcdf(d1)
+
+f_findstrike(S, T, r, sigma, target) =>
+    var float lo = S
+    var float hi = S * 1.6
+    lo := S
+    hi := S * 1.6
+    for i = 0 to 49
+        mid = (lo + hi) / 2
+        if f_bsdelta(S, mid, T, r, sigma) > target
+            lo := mid
+        else
+            hi := mid
+    math.round((lo + hi) / 2)
+
+f_inweek(t, e) =>
+    dow = dayofweek(e)
+    daysSinceMon = (dow - dayofweek.monday + 7) % 7
+    weekStart = e - daysSinceMon * 86400000
+    weekEnd = weekStart + 5 * 86400000
+    t >= weekStart and t < weekEnd
+
+// ---------- Signal + vol ----------
+ema8 = ta.ema(close, emaLen)
+logRet = math.log(close / close[1])
+sigma = ta.stdev(logRet, volLen) * math.sqrt(252)
+
+signal = close > ema8 and close[1] > ema8[1] and close[2] > ema8[2]
+blackout = f_inweek(time, earn1) or f_inweek(time, earn2) or f_inweek(time, earn3)
+
+// ---------- State machine (mirrors nvda_ema_signal_backtest.py) ----------
+var bool  inPosition   = false
+var int   entryBarIdx  = na
+var float Klong        = na
+var float Kshort       = na
+var float debit        = na
+var float entryS       = na
+
+var int   totalTrades  = 0
+var int   winTrades    = 0
+var float sumRet       = 0.0
+var float equity       = 1.0
+
+if not inPosition and signal and not blackout and not na(sigma) and sigma > 0
+    T0 = dteInput / 365.0
+    kl = f_findstrike(close, T0, rFree, sigma, targetDelta)
+    ks = kl + width
+    raw = f_bscall(close, kl, T0, rFree, sigma) - f_bscall(close, ks, T0, rFree, sigma)
+    d = raw * (1 + slippagePct) + feePerContract / 100.0
+    if d > 0
+        Klong := kl
+        Kshort := ks
+        debit := d
+        entryS := close
+        entryBarIdx := bar_index
+        inPosition := true
+        label.new(bar_index, low, "ENTRY\n" + str.tostring(kl, "#") + "C/" + str.tostring(ks, "#") +
+                   "C\ndebit $" + str.tostring(d, "#.##"), style=label.style_label_up,
+                   color=color.new(color.blue, 0), textcolor=color.white, size=size.small, yloc=yloc.belowbar)
+
+if inPosition and bar_index > entryBarIdx
+    daysHeld = bar_index - entryBarIdx
+    T = math.max(dteInput - daysHeld, 0) / 365.0
+    val = f_bscall(close, Klong, T, rFree, sigma) - f_bscall(close, Kshort, T, rFree, sigma)
+    ret = val / debit - 1.0
+    if ret >= profitTarget or daysHeld >= dteInput
+        finalRet = math.max(ret, -1.0)
+        totalTrades := totalTrades + 1
+        if finalRet > 0
+            winTrades := winTrades + 1
+        sumRet := sumRet + finalRet
+        equity := equity * (1 + finalRet)
+        reason = ret >= profitTarget ? "target" : "expiration"
+        label.new(bar_index, high, "EXIT (" + reason + ")\n" + str.tostring(finalRet * 100, "#.#") + "%",
+                   style=label.style_label_down,
+                   color=finalRet >= 0 ? color.new(color.green, 0) : color.new(color.red, 0),
+                   textcolor=color.white, size=size.small, yloc=yloc.abovebar)
+        inPosition := false
+
+// ---------- Plots ----------
+plot(ema8, "8 EMA", color=color.orange, linewidth=2)
+bgcolor(blackout ? color.new(color.red, 85) : na, title="Earnings blackout week")
+plotshape(signal and not inPosition and not blackout, title="Entry signal", style=shape.triangleup,
+          location=location.belowbar, color=color.blue, size=size.tiny)
+
+// ---------- Summary table ----------
+if barstate.islast
+    var table t = table.new(position.top_right, 2, 5, bgcolor=color.new(color.black, 70), border_width=1)
+    table.cell(t, 0, 0, "NVDA bull call spread", text_color=color.white, bgcolor=color.new(color.blue, 60))
+    table.cell(t, 1, 0, "EMA-signal backtest", text_color=color.white, bgcolor=color.new(color.blue, 60))
+    table.cell(t, 0, 1, "Trades (closed)", text_color=color.white)
+    table.cell(t, 1, 1, str.tostring(totalTrades), text_color=color.white)
+    table.cell(t, 0, 2, "Win rate", text_color=color.white)
+    table.cell(t, 1, 2, totalTrades > 0 ? str.tostring(winTrades / totalTrades * 100, "#.#") + "%" : "n/a", text_color=color.white)
+    table.cell(t, 0, 3, "Mean return/trade", text_color=color.white)
+    table.cell(t, 1, 3, totalTrades > 0 ? str.tostring(sumRet / totalTrades * 100, "#.#") + "%" : "n/a", text_color=color.white)
+    table.cell(t, 0, 4, "Compounded equity", text_color=color.white)
+    table.cell(t, 1, 4, str.tostring(equity, "#.###") + "x", text_color=color.white)

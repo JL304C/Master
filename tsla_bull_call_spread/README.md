@@ -119,6 +119,21 @@ exposed to) requires 1–2+ years of daily NVDA data, which needs either a
 paid Alpha Vantage tier or another data source this environment can reach —
 worth doing before trading this live.
 
+## Longer backtest via TradingView (run 2026-09-19)
+
+Neither TradingView nor Alpaca is reachable from this environment as a data
+source: neither is a connected MCP connector, TradingView has no
+general-purpose historical-data API to query in the first place, and a
+direct call to Alpaca's market-data API was blocked by this environment's
+network egress policy (`data.alpaca.markets:443 — connect_rejected,
+organization policy`) — the same wall Yahoo Finance hit earlier. But since
+the user already has a TradingView plan with its own deep NVDA history,
+`nvda_bull_call_spread_signal.pine` ports the same signal/blackout/BS-pricing
+logic into Pine Script v5 to run directly there, sidestepping the data-length
+problem entirely instead of working around it. Install steps and how to read
+the results are in the chat record; the script itself is the artifact of
+record here.
+
 ---
 
 ## Audit history
@@ -312,6 +327,14 @@ signal-quality bar with less of TSLA's extra chop layered on top.
   8-EMA/3-day entry signal plus earnings blackout, walking the actual NVDA
   closes on disk and managing each trade against real subsequent prices.
 - `nvda_ema_signal_backtest_output_2026-09-19.txt` — backtest run output.
+- `nvda_bull_call_spread_signal.pine` — Pine Script v5 port of the same
+  entry signal + earnings blackout + Black-Scholes management logic, meant
+  to run directly on TradingView's own (much deeper) NVDA price history.
+  Built as an `indicator()`, not a `strategy()`: TradingView's Strategy
+  Tester prices P&L off the charted symbol itself, which has no concept of
+  a two-leg spread — this script runs its own bar-by-bar BS engine instead
+  and reports results via on-chart labels and a summary table. See "Longer
+  backtest via TradingView" below.
 - `stop_pct_sweep_output_2026-09-19.txt` — stop-percentage sweep run output.
 
 ## Known limitations (disclosed, not hidden)
