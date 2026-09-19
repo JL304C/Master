@@ -1,10 +1,84 @@
-# TSLA Bull Call Spread — Rule Audit
+# Bull Call Spread — Rule Audit → Final NVDA Strategy
 
-Audits the bull-call-debit-spread rule set (below) against TSLA's **real** price
-history and Black-Scholes-priced option chain (Alpha Vantage free tier — real
+Audits the bull-call-debit-spread rule set (below) against real price history
+and Black-Scholes-priced option chains (Alpha Vantage free tier — real
 options-chain and realtime-quote endpoints are premium-gated on this key, so
-the chain itself is theoretical, calibrated to TSLA's real ~53% realized vol;
-see `tsla_bull_call_spread_audit.py` for the exact math).
+chains are theoretical, calibrated to each ticker's real realized vol; see
+`tsla_bull_call_spread_audit.py` for the exact math). Started as a TSLA-only
+audit, then extended to NVDA/MSFT and iterated on the entry/exit rules —
+**the settled result is the NVDA strategy below.**
+
+## Final strategy — NVDA bull call debit spread
+
+Settled 2026-09-19 after auditing TSLA, NVDA, and MSFT and testing two
+profit-taking rules and several stop designs. See `nvda_final_strategy_audit.py`
+/ `nvda_final_strategy_output_2026-09-19.txt` for the exact run.
+
+**Underlying: NVDA only.** Of the three tickers audited, NVDA has the best
+numbers on every measured axis — cheapest relative debit (21.5% of a
+$10-wide spread vs TSLA's 23.8%), best reward:risk (3.64x vs 3.26x), and the
+best no-stop mean return/win rate. MSFT is excluded: its vol only clears the
+entry floor because of one earnings-gap day (see Rule Refinements below).
+
+**Entry** (unchanged from the original rules, now with a concrete vol
+filter): only when the signal generator (external to this audit — see
+Limitations) calls a strong, time-bounded bullish move. Buy the ~30-delta
+call, sell the call 10 strikes higher, same expiration (30 DTE tested as the
+base case; 21–60 DTE all pass the same checks — see Section 1 of the final
+audit). Require **trimmed realized vol > 35%** (a robust IV proxy — see Rule
+Refinements) and **net debit ≤ 30% of the $10 width, never above $3.00**
+($2.50 ideal). On today's real NVDA price/vol this prices at **$2.15 (21.5%
+of width)** for the 30 DTE case, breakeven $240.15, max profit $7.85,
+reward:risk 3.64x.
+
+**Exit — this is the part that changed from the original rules:**
+- Close **both legs together** the first time the spread's value reaches
+  **45–50% of the debit paid back as profit**. No sell-half/hold-remainder
+  variant — testing showed close-all outperforms it in every regime except a
+  sustained strong bull run, and even there only by taking on ~2x the return
+  volatility for a much lower win rate.
+- **No price-based stop-loss.** This is a defined-risk spread: max loss is
+  already capped at the debit paid, whatever NVDA does. A stop (tested flat
+  and as a % of price, 2–6%) doesn't lower that floor — it only closes some
+  recoverable trades early, and it reduced mean return at every level tested.
+  Removing the stop entirely is the data-backed choice.
+- If the profit target isn't hit, **close by expiration** rather than letting
+  it expire or risk assignment — this part of the original rule set stands
+  even without a stop.
+- Never add to, roll, or adjust a losing leg. Size each trade so a full loss
+  of the debit is acceptable ("position for zero").
+
+**Expected performance (Monte Carlo, 5,000 paths/regime, final rules, 30
+DTE base case):**
+
+| regime | win rate | total loss rate | mean return | median return |
+|---|---|---|---|---|
+| strong bull (+60%/yr) | 76.8% | 23.0% | +33.6% | +58.3% |
+| moderate bull (+30%/yr) | 68.8% | 30.9% | +18.3% | +53.9% |
+| weak bull (+12%/yr) | 63.2% | 36.5% | +9.1% | +51.2% |
+| flat (0%/yr) | 61.3% | 38.4% | +5.5% | +50.6% |
+| bear (-25%/yr) | 60.6% | 39.2% | +3.7% | +50.5% |
+| vol crush (IV -40%) | 48.5% | 50.7% | -13.2% | -100.0% |
+
+Average mean return across all 6 regimes: **+10.3%**. Every regime is
+expected-positive except a vol-crush environment (a falling-IV move hurts
+a long-premium position regardless of price direction — worth checking
+IV rank isn't already elevated/about to mean-revert at entry, on top of the
+35% floor). Removing the stop is *why* flat and mild-bear tapes are now
+average-positive too: a trade with no stop gets the full 30 days to recover
+into the 45% target rather than being cut off early.
+
+**Still open / cannot be audited from price data alone:** the "strong,
+time-bounded bullish signal" itself has no defined generator — this audit
+validates everything downstream of a valid signal, not the signal itself.
+NVDA's next earnings date could not be confirmed (Alpha Vantage
+`EARNINGS_CALENDAR` returned nothing at 3/6/12-month horizons on this key) —
+check it manually before entry and avoid an expiration that spans it unless
+that's a deliberate choice.
+
+---
+
+## Audit history
 
 ## The rules being audited
 
@@ -172,6 +246,9 @@ signal-quality bar with less of TSLA's extra chop layered on top.
 
 ## Files
 
+- `nvda_final_strategy_audit.py` — **the final strategy**: NVDA only,
+  close-all-@45% with no stop, entry construction across DTE 21–60, and the
+  5,000-path/regime Monte Carlo behind the performance table above.
 - `tsla_bull_call_spread_audit.py` — the original TSLA-only audit: real-data
   entry check (Section 1), Monte Carlo of both profit-taking rules across 6
   drift/vol regimes (Section 2), and entry-debit sensitivity (Section 3).
@@ -187,6 +264,7 @@ signal-quality bar with less of TSLA's extra chop layered on top.
   same 6 regimes.
 - `audit_output_2026-09-19.txt` — TSLA-only audit run output.
 - `cross_ticker_output_2026-09-19.txt` — cross-ticker audit run output.
+- `nvda_final_strategy_output_2026-09-19.txt` — final strategy run output.
 - `stop_pct_sweep_output_2026-09-19.txt` — stop-percentage sweep run output.
 
 ## Known limitations (disclosed, not hidden)

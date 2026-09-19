@@ -1,0 +1,36 @@
+NVDA  S0=$222.27  raw_vol=41.2%  trimmed_vol(IV proxy)=39.1%  100d_drift=+10.6% (noisy, not used as a forecast -- see Monte Carlo regimes)
+Entry filter: PASS (trimmed_vol 39.1% vs 35% floor)
+Next earnings date: NOT AVAILABLE -- Alpha Vantage EARNINGS_CALENDAR returned no entry for NVDA at 3/6/12-month horizons on this key. Check the real date manually before entry; do not assume none is coming.
+
+=== Section 1: entry construction by DTE (NVDA, today's real price/vol) ===
+ DTE  K_long  K_short   debit  debit/width  breakeven max_profit  reward:risk
+  21     235      245    2.11       21.1%     237.11       7.89        3.74x  [PASS]
+  30     238      248    2.15       21.5%     240.15       7.85        3.64x  [PASS]
+  35     240      250    2.12       21.2%     242.12       7.88        3.72x  [PASS]
+  45     242      252    2.21       22.1%     244.21       7.79        3.53x  [PASS]
+  60     246      256    2.19       21.9%     248.19       7.81        3.56x  [PASS]
+
+=== Section 2: Monte Carlo, final rules (close-all @45%, no stop), 5000 paths/regime ===
+Base construction: long 238C / short 248C, 30DTE, net debit $2.15 (21.5% of width)
+
+regime                        win_rate  total_loss_rate  mean_ret  median_ret  return_sd  mean/sd
+strong_bull_+60pct              77.1%           22.6%   +34.1%     +58.0%       0.78    +0.44
+moderate_bull_+30pct            69.7%           30.1%   +20.0%     +54.7%       0.83    +0.24
+weak_bull_+12pct                63.2%           36.5%    +9.0%     +51.5%       0.86    +0.10
+flat_0pct                       62.4%           37.3%    +7.8%     +51.1%       0.86    +0.09
+bear_-25pct                     60.8%           39.1%    +4.1%     +50.4%       0.86    +0.05
+vol_crush_+30pct_low_iv         48.5%           50.7%   -13.2%    -100.0%       0.92    -0.14
+
+Average mean return across all 6 regimes: +10.3%
+
+Reading: with no stop and a 45% profit target, expected return is positive in every regime
+tested EXCEPT a vol-crush (IV collapse) environment -- even flat and mild-bear tapes come out
+slightly positive on average, because with no stop a trade that's merely drifting sideways or
+down gets the full 30 days to recover into the profit target before closing. The one regime
+that actually loses money is a drop in implied vol, which hurts a long-premium position (the
+spread's long leg loses more value to a falling IV than the short leg gives back) independent
+of price direction. The strategy's edge still depends on the paragraph-1 signal firing often
+enough, and being right often enough, to keep the outcome mix weighted toward the bull
+regimes -- which this audit cannot verify, since the signal generator itself is undefined.
+Everything downstream of a valid signal checks out.
+
