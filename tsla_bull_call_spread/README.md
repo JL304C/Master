@@ -160,6 +160,13 @@ that first run, both now fixed in the script:
 Re-run with the fixed script and a recent start date to get numbers that are
 actually comparable to trading NVDA today.
 
+## Automation
+
+The strategy above is now automated against Alpaca paper trading in
+[`../nvda_bull_call_spread_bot/`](../nvda_bull_call_spread_bot/README.md),
+mirroring how `gpc_wheel_bot/` automates its own audited strategy — same
+entry/exit rules, no changes made in translation to a live bot.
+
 ---
 
 ## Audit history
