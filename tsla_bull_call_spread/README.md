@@ -82,23 +82,91 @@ to 50–58%. The strategy's edge is entirely contingent on the paragraph-1
 signal being right often enough and by enough to clear these odds — which,
 per point 2, this audit cannot verify.
 
+## Cross-ticker follow-up: NVDA and MSFT, with two added rules (run 2026-09-19)
+
+Follow-up request: re-run against NVDA and MSFT (not just TSLA), gated by an
+**IV-at-entry floor of 35%**, plus a **"thesis broken" stop** that closes both
+legs immediately if the underlying trades 10 points below entry. See
+`cross_ticker_audit.py` / `cross_ticker_output_2026-09-19.txt`.
+
+No real IV data was available on this key (see Limitations), so the 35% floor
+is applied to trailing 100-day **realized** vol as a disclosed proxy.
+
+| symbol | spot | vol (IV proxy) | entry filter | debit | debit/width | reward:risk |
+|---|---|---|---|---|---|---|
+| TSLA | $364.27 | 52.8% | PASS | $2.34 | 23.4% | 3.26x |
+| NVDA | $222.27 | 41.2% | PASS | $2.15 | 21.5% | 3.64x |
+| MSFT | $493.78 | 38.4% | PASS | $2.46 | 24.6% | 3.07x |
+
+All three clear both the 35% IV floor and the original debit ceiling today.
+Two results from this run matter more than the pass/fail table, though:
+
+**A. MSFT's pass is fragile — it's one earnings-gap day doing the work.**
+MSFT's 100-day realized vol of 38.4% includes a single +14.4% gap day
+(2026-07-29→07-30, an earnings move). Recomputed excluding just that one day,
+MSFT's realized vol drops to **30.9% — below the 35% floor**, meaning MSFT
+would have *failed* the entry filter on a window that didn't happen to
+contain that gap. Trailing realized vol computed over a fixed lookback is
+sensitive to whether a single outlier event falls inside the window, which
+is a reason to prefer real forward-looking IV / IV rank (not available on
+this API key) over a realized-vol proxy for this specific filter.
+
+**B. The 10-point thesis-broken stop is not equivalent risk across tickers,
+and it substantially changes the strategy's return profile everywhere.**
+Compared to the same regimes without the stop (TSLA-only audit above), adding
+it collapsed total-loss-rate (full max-loss outcomes) to roughly 0–1% almost
+across the board — real tail protection. But it did that by cutting win rates
+roughly in half and cutting mean returns substantially in every regime for
+all three tickers (e.g. TSLA strong-bull mean return: +25.9% → +6.5%; win
+rate 73.0% → 44.9%), because ordinary short-term noise routinely produces a
+10-point pullback even on paths that go on to be winners. The size of that
+effect differs by ticker because 10 points is a different fraction of each
+stock's own volatility: it's under 1 daily-sigma move on TSLA and MSFT but
+about 1.75 daily-sigma on NVDA (lower price, lower $ vol per point) — which
+is why NVDA kept the highest win rates (44.8–59.1%) of the three after the
+stop was added. A fixed-dollar stop is tighter, in effective terms, on a
+higher-priced/higher-vol name than a lower-priced one. If the intent is
+"exit when the thesis is genuinely wrong" rather than "exit on routine
+chop," the stop distance should probably scale with the underlying (e.g., a
+multiple of ATR or a % of spot) rather than staying a flat 10 points across
+tickers.
+
+Full regime-by-regime numbers (strong/moderate/weak bull, flat, bear, vol
+crush, for both profit-taking rules) are in `cross_ticker_output_2026-09-19.txt`.
+
 ## Files
 
-- `tsla_bull_call_spread_audit.py` — the audit: real-data entry check
-  (Section 1), Monte Carlo of both profit-taking rules across 6 drift/vol
-  regimes (Section 2), and entry-debit sensitivity (Section 3).
-- `data/tsla_daily_2026-09-18.json` — raw Alpha Vantage `TIME_SERIES_DAILY`
-  response used for the realized-vol calibration (real data, not simulated).
-- `audit_output_2026-09-19.txt` — full run output.
+- `tsla_bull_call_spread_audit.py` — the original TSLA-only audit: real-data
+  entry check (Section 1), Monte Carlo of both profit-taking rules across 6
+  drift/vol regimes (Section 2), and entry-debit sensitivity (Section 3).
+- `cross_ticker_audit.py` — the follow-up: same construction/Monte Carlo
+  logic applied to TSLA, NVDA, and MSFT, with the 35% IV-entry floor and the
+  10-point thesis-broken stop layered in.
+- `data/tsla_daily_2026-09-18.json`, `data/nvda_daily_2026-09-18.json`,
+  `data/msft_daily_2026-09-18.json` — raw Alpha Vantage `TIME_SERIES_DAILY`
+  responses used for realized-vol calibration (real data, not simulated).
+- `audit_output_2026-09-19.txt` — TSLA-only audit run output.
+- `cross_ticker_output_2026-09-19.txt` — cross-ticker audit run output.
 
 ## Known limitations (disclosed, not hidden)
 
-- No live TSLA option chain was available (Alpha Vantage `REALTIME_OPTIONS`
-  and `HISTORICAL_OPTIONS` both returned premium-tier errors on this key);
-  Section 1's strikes/debit are Black-Scholes theoretical values calibrated
-  to TSLA's real trailing 100-day realized vol, not quoted market prices.
-  Real bid/ask on a name this liquid should track fairly close, but the
-  quoted debit should always be checked against the live chain before entry.
+- No live option chain was available for any of the three tickers (Alpha
+  Vantage `REALTIME_OPTIONS` and `HISTORICAL_OPTIONS` both returned
+  premium-tier errors on this key); all strikes/debits are Black-Scholes
+  theoretical values calibrated to each ticker's real trailing 100-day
+  realized vol, not quoted market prices. Real bid/ask on names this liquid
+  should track fairly close, but the quoted debit should always be checked
+  against the live chain before entry.
+- The 35% "IV" entry floor in the cross-ticker follow-up is applied to
+  trailing realized vol, not true implied vol (unavailable on this key) —
+  see finding A above for a concrete case (MSFT) where that substitution
+  changes the entry decision depending on whether one outlier day is inside
+  the lookback window. Real IV/IV-rank would not have this artifact.
+- NVDA's earnings date could not be confirmed (Alpha Vantage
+  `EARNINGS_CALENDAR` returned no entry in the next 3 months); MSFT's
+  `EARNINGS_CALENDAR` call returned a malformed response and was not
+  retried. Neither ticker's earnings-overlap risk has been verified the way
+  TSLA's was — check both manually before entry.
 - The 30-day base case in Section 2 is a disclosed assumption — the rule
   text doesn't specify DTE; Section 1 shows the same entry check across
   21/30/35/45/60 DTE.

@@ -1,0 +1,70 @@
+Rules under test: entry requires vol > 35% (IV proxy = trailing realized vol); thesis-broken stop = close immediately if price <= entry - 10 pts
+
+=== TSLA: S0=$364.27  trailing-100d realized vol (IV proxy) = 52.8% ===
+  ENTRY FILTER: PASS (52.8% > 35% floor)
+  30DTE construction: long 400C / short 410C, debit $2.34 (23.4% of width), reward:risk 3.26x -> PASS debit-ceiling rule
+  Thesis-broken stop level: $354.27 (2.7% below spot)
+  --- close-all @45% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=44.9%  total_loss_rate= 0.1%  mean_ret= +6.5%  return_sd=0.58
+    moderate_bull_+30pct         win_rate=41.7%  total_loss_rate= 0.0%  mean_ret= +2.4%  return_sd=0.57
+    weak_bull_+12pct             win_rate=40.1%  total_loss_rate= 0.0%  mean_ret= +0.1%  return_sd=0.57
+    flat_0pct                    win_rate=37.2%  total_loss_rate= 0.0%  mean_ret= -2.2%  return_sd=0.56
+    bear_-25pct                  win_rate=36.6%  total_loss_rate= 0.0%  mean_ret= +1.0%  return_sd=0.53
+    vol_crush_+30pct_low_iv      win_rate=34.2%  total_loss_rate= 8.0%  mean_ret=-31.0%  return_sd=0.78
+  --- sell-half @100% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=27.6%  total_loss_rate= 0.4%  mean_ret=+13.3%  return_sd=1.02
+    moderate_bull_+30pct         win_rate=24.9%  total_loss_rate= 0.9%  mean_ret= +3.2%  return_sd=0.95
+    weak_bull_+12pct             win_rate=22.4%  total_loss_rate= 0.8%  mean_ret= -2.1%  return_sd=0.91
+    flat_0pct                    win_rate=21.6%  total_loss_rate= 0.3%  mean_ret= -5.6%  return_sd=0.86
+    bear_-25pct                  win_rate=20.4%  total_loss_rate= 0.1%  mean_ret= -6.6%  return_sd=0.77
+    vol_crush_+30pct_low_iv      win_rate=22.0%  total_loss_rate=12.3%  mean_ret=-20.4%  return_sd=1.16
+
+=== NVDA: S0=$222.27  trailing-100d realized vol (IV proxy) = 41.2% ===
+  ENTRY FILTER: PASS (41.2% > 35% floor)
+  30DTE construction: long 239C / short 249C, debit $2.15 (21.5% of width), reward:risk 3.64x -> PASS debit-ceiling rule  [earnings: not found in next-3mo Alpha Vantage EARNINGS_CALENDAR call]
+  Thesis-broken stop level: $212.27 (4.5% below spot)
+  --- close-all @45% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=59.1%  total_loss_rate= 0.9%  mean_ret=+14.7%  return_sd=0.71
+    moderate_bull_+30pct         win_rate=54.6%  total_loss_rate= 1.0%  mean_ret= +7.3%  return_sd=0.71
+    weak_bull_+12pct             win_rate=50.4%  total_loss_rate= 0.4%  mean_ret= +1.8%  return_sd=0.70
+    flat_0pct                    win_rate=48.9%  total_loss_rate= 0.8%  mean_ret= -0.7%  return_sd=0.70
+    bear_-25pct                  win_rate=46.6%  total_loss_rate= 0.3%  mean_ret= +0.7%  return_sd=0.65
+    vol_crush_+30pct_low_iv      win_rate=44.8%  total_loss_rate=27.0%  mean_ret=-18.7%  return_sd=0.91
+  --- sell-half @100% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=40.9%  total_loss_rate= 3.4%  mean_ret=+43.8%  return_sd=1.35
+    moderate_bull_+30pct         win_rate=33.2%  total_loss_rate= 3.2%  mean_ret=+16.7%  return_sd=1.22
+    weak_bull_+12pct             win_rate=30.0%  total_loss_rate= 3.2%  mean_ret= +3.6%  return_sd=1.16
+    flat_0pct                    win_rate=25.9%  total_loss_rate= 4.2%  mean_ret= -8.6%  return_sd=1.08
+    bear_-25pct                  win_rate=25.1%  total_loss_rate= 1.7%  mean_ret=-10.6%  return_sd=0.96
+    vol_crush_+30pct_low_iv      win_rate=29.0%  total_loss_rate=34.6%  mean_ret= -9.5%  return_sd=1.28
+
+=== MSFT: S0=$493.78  trailing-100d realized vol (IV proxy) = 38.4% ===
+  ENTRY FILTER: PASS (38.4% > 35% floor)
+  30DTE construction: long 528C / short 538C, debit $2.46 (24.6% of width), reward:risk 3.07x -> PASS debit-ceiling rule  [earnings: EARNINGS_CALENDAR call returned a malformed/error response -- NOT independently verified, check manually before entry]
+  Thesis-broken stop level: $483.78 (2.0% below spot)
+  --- close-all @45% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=47.3%  total_loss_rate= 0.0%  mean_ret= +8.9%  return_sd=0.57
+    moderate_bull_+30pct         win_rate=42.9%  total_loss_rate= 0.0%  mean_ret= +3.1%  return_sd=0.56
+    weak_bull_+12pct             win_rate=40.9%  total_loss_rate= 0.0%  mean_ret= +1.3%  return_sd=0.56
+    flat_0pct                    win_rate=36.6%  total_loss_rate= 0.0%  mean_ret= -3.8%  return_sd=0.54
+    bear_-25pct                  win_rate=35.4%  total_loss_rate= 0.0%  mean_ret= -0.4%  return_sd=0.51
+    vol_crush_+30pct_low_iv      win_rate=38.6%  total_loss_rate= 6.0%  mean_ret=-24.3%  return_sd=0.79
+  --- sell-half @100% (with thesis-broken stop) ---
+    strong_bull_+60pct           win_rate=31.8%  total_loss_rate= 0.3%  mean_ret=+21.5%  return_sd=1.06
+    moderate_bull_+30pct         win_rate=24.7%  total_loss_rate= 0.5%  mean_ret= +3.2%  return_sd=0.93
+    weak_bull_+12pct             win_rate=24.3%  total_loss_rate= 0.5%  mean_ret= -2.1%  return_sd=0.87
+    flat_0pct                    win_rate=22.7%  total_loss_rate= 1.0%  mean_ret= -5.1%  return_sd=0.86
+    bear_-25pct                  win_rate=20.2%  total_loss_rate= 0.2%  mean_ret= -7.5%  return_sd=0.74
+    vol_crush_+30pct_low_iv      win_rate=23.5%  total_loss_rate=12.2%  mean_ret=-17.8%  return_sd=1.14
+
+=== Cross-ticker summary (entry filter + construction) ===
+symbol       S0  vol(IV proxy)  entry_pass   debit  debit/width  reward:risk
+TSLA     364.27         52.8%         YES    2.34       23.4%        3.26x
+NVDA     222.27         41.2%         YES    2.15       21.5%        3.64x
+MSFT     493.78         38.4%         YES    2.46       24.6%        3.07x
+
+=== Cross-ticker summary: 'flat' regime, close-all @45% rule, with thesis-broken stop ===
+symbol   win_rate   mean_ret  total_loss_rate
+TSLA       37.2%     -2.2%            0.0%
+NVDA       48.9%     -0.7%            0.8%
+MSFT       36.6%     -3.8%            0.0%
