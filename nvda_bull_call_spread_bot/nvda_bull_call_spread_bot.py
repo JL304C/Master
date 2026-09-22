@@ -11,11 +11,13 @@ after the audit/backtest iteration there:
     Entered as ONE multi-leg limit order at a net debit near the midpoint.
   - Entry gate: net debit <= 30% of the $10 width and <= $3.00/share, and
     implied reward:risk >= 2.3x -- otherwise skip this cycle, don't chase.
-  - Exit: close both legs together (via two close_position calls, Alpaca's
-    own documented pattern for closing a multi-leg position -- see
-    alpacahq/alpaca-py examples/options/options-bull-call-spread.ipynb) the
-    first time the spread's value reaches 45% of the debit paid, OR when
-    <=2 days remain to expiration, whichever comes first. NO stop-loss --
+  - Exit: close both legs together via ONE multi-leg limit order (see the
+    2026-09-22 fix note on close_spread() -- an earlier version used two
+    separate close_position calls per Alpaca's own reference notebook, which
+    triggered an "uncovered option contracts" rejection on this account's
+    options tier when closing the second leg) the first time the spread's
+    value reaches 45% of the debit paid, OR when <=2 days remain to
+    expiration, whichever comes first. NO stop-loss --
     this is a defined-risk spread; the max loss is already capped at the
     debit, so a stop only converts recoverable trades into early partial
     losses (see tsla_bull_call_spread/stop_pct_sweep_output_2026-09-19.txt).
@@ -41,17 +43,28 @@ live endpoint. Going live later means writing that decision explicitly,
 not flipping a flag here.
 
 STATUS (disclosed): built from Alpaca's own verified reference notebook for
-the multi-leg order and close_position calls. Every import, request class,
-enum member, and model field this script touches (GetOptionContractsRequest,
+the multi-leg order pattern. Every import, request class, enum member, and
+model field this script touches (GetOptionContractsRequest,
 OptionLatestQuoteRequest, LimitOrderRequest+OrderClass.MLEG+OptionLegRequest,
-ClosePositionRequest, GetOrdersRequest, StockBarsRequest, Position.side,
-Position.avg_entry_price, Order.legs, PositionSide.SHORT, ...) was checked
-by installing alpaca-py 0.44.0 and constructing each object directly against
-the real SDK -- not just written from memory. What that check CANNOT cover,
-with no live account reachable from the environment that wrote this: actual
-order fills, real quote data shapes at runtime, and end-to-end timing.
-Treat the first manual paper run as the real integration test (see
-README.md) and read its output closely rather than trusting it blind.
+GetOrdersRequest, StockBarsRequest, Position.side, Position.avg_entry_price,
+Order.legs, PositionSide.SHORT, ...) was checked by installing alpaca-py
+0.44.0 and constructing each object directly against the real SDK -- not
+just written from memory.
+
+PROVEN LIMIT OF THAT VALIDATION, from the first real trade (2026-09-21/22):
+SDK-level construction checks catch "does this API shape exist" -- they
+cannot catch "will Alpaca's risk engine accept this on THIS account's
+options approval tier." The original close_spread() used two separate
+close_position calls (Alpaca's own reference notebook pattern, and it
+constructed fine against the SDK) but was REJECTED at runtime closing the
+second leg ("account not eligible to trade uncovered option contracts") --
+only surfaced by an actual live order, not by any static check. Fixed by
+closing both legs as one combo order instead (see close_spread() below).
+That first trade closed successfully anyway (the short leg's close had
+already gone through; the long leg was closed manually) for a real
++57.1% return -- but the lesson stands: read live order results, don't
+assume a past SDK-level check covers business-logic/account-tier
+rejections that only a real order against a real account can surface.
 
 Requires: pip install alpaca-py
 Credentials: set ALPACA_API_KEY / ALPACA_SECRET_KEY as environment
@@ -73,7 +86,6 @@ from alpaca.trading.requests import (
     LimitOrderRequest,
     GetOptionContractsRequest,
     GetOrdersRequest,
-    ClosePositionRequest,
     OptionLegRequest,
 )
 from alpaca.trading.enums import (
@@ -420,16 +432,36 @@ def submit_entry(long_symbol: str, short_symbol: str, limit_debit: float):
     return trade_client.submit_order(req)
 
 
-def close_spread(long_symbol: str, short_symbol: str):
-    """Two separate close_position calls -- Alpaca's own documented pattern
-    for exiting a multi-leg position (see alpacahq/alpaca-py examples/
-    options/options-bull-call-spread.ipynb, roll_rinse_bull_call_spread)."""
-    results = {}
-    results["short"] = trade_client.close_position(
-        symbol_or_asset_id=short_symbol, close_options=ClosePositionRequest(qty="1"))
-    results["long"] = trade_client.close_position(
-        symbol_or_asset_id=long_symbol, close_options=ClosePositionRequest(qty="1"))
-    return results
+def close_spread(long_symbol: str, short_symbol: str, limit_credit: float):
+    """ONE multi-leg limit order closing both legs together, mirroring how
+    the entry itself is submitted.
+
+    FIXED 2026-09-22: originally used two separate close_position calls
+    (Alpaca's own reference notebook pattern -- alpacahq/alpaca-py examples/
+    options/options-bull-call-spread.ipynb, roll_rinse_bull_call_spread).
+    On the first real trade, that closed the short leg fine but then
+    rejected the long leg's close with "account not eligible to trade
+    uncovered option contracts" -- closing a spread's two legs as separate
+    orders can transiently look like writing a naked option to Alpaca's
+    risk check, on accounts not approved for uncovered options specifically
+    (as opposed to the defined-risk multi-leg spreads this account IS
+    approved for, which is how the entry combo order works fine). A single
+    combo order, selling the long leg and buying back the short leg
+    together, is recognized as the same defined-risk spread trade the
+    entry was -- consistent with how entry already works, and with the
+    "close both legs together" requirement in the strategy rules besides."""
+    legs = [
+        OptionLegRequest(symbol=long_symbol, side=OrderSide.SELL, ratio_qty=1),
+        OptionLegRequest(symbol=short_symbol, side=OrderSide.BUY, ratio_qty=1),
+    ]
+    req = LimitOrderRequest(
+        qty=1,
+        order_class=OrderClass.MLEG,
+        time_in_force=TimeInForce.DAY,
+        limit_price=round(limit_credit, 2),
+        legs=legs,
+    )
+    return trade_client.submit_order(req)
 
 
 # --------------------------------------------------------------------------- #
@@ -476,9 +508,10 @@ def run():
 
         if ret >= PROFIT_TARGET or dte <= CLOSE_BY_DTE:
             reason = "profit_target" if ret >= PROFIT_TARGET else "close_by_expiration"
-            close_spread(long_pos.symbol, short_pos.symbol)
+            order = close_spread(long_pos.symbol, short_pos.symbol, current_value)
             log({"action": "close_spread", "symbol": long_pos.symbol, "qty": 1,
-                 "reason": f"{reason}: ret={ret:+.1%} dte={dte} entry_debit={entry_debit:.2f} current_value={current_value:.2f}"})
+                 "reason": f"{reason}: ret={ret:+.1%} dte={dte} entry_debit={entry_debit:.2f} "
+                           f"current_value={current_value:.2f} order_id={order.id}"})
             return
 
         log({"action": "wait", "symbol": long_pos.symbol,
