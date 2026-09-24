@@ -5,12 +5,43 @@ inversion" scalp for Nasdaq futures. Every chart concept from the spec is
 turned into a numeric rule, so the strategy can be tested before any broker
 connection is built.
 
-**Status: the engine is validated, but the strategy has NOT been validated.**
-No real 1-minute NQ history could be downloaded from the build environment
-(Alpha Vantage intraday is a premium endpoint, and Yahoo was blocked). The
-audit below proves the backtester is honest. It cannot say whether the
-strategy makes money; only running it on real NQ bars (step 2 below) can
-answer that.
+**Verdict: FAILED on 10 years of real NQ data. Do not automate this as specified.**
+It was tested on 3.5M one-minute bars (Databento, Sept 2016 – Sept 2026,
+front month). It failed every one of the four pre-committed pass rules
+(below).
+
+## Real-data results (NQ, 2016-09-25 → 2026-09-23, net of costs, MNQ at $260 risk)
+
+| | Result |
+|---|---|
+| Trades | 281 over 2,583 sessions (~28/yr, one every ~9 days) |
+| Win rate | 28.8%. Avg win $535, avg loss −$283. Break-even needs ≈34.6%. |
+| Expectancy | **−$47/trade (−0.21R)**, profit factor 0.77 |
+| Net P&L | **−$13,287** (gross before fees and slippage: −$4,476) |
+| Before *any* costs | −$1,584 (≈ −$6/trade). No raw edge at all. |
+| Max drawdown | **$17,766 = 68% of a $26k account** |
+| 95% bootstrap CI of expectancy | −$92.66 … +$0.74 |
+| First half / second half | −$6,260 / −$7,028. Both lose. |
+| London / NY | −$5,549 (211 trades) / −$7,739 (70 trades) |
+
+**Pass rules** (committed before seeing the data):
+1. Both halves net-positive: **FAIL** (both negative).
+2. The CI must exclude zero: **FAIL**. It sits almost entirely below zero.
+3. No ±20% change may flip the result to a loss: **moot**. All 16
+   sensitivity and variant runs lost money, from −$3,177 (displacement 2.1×)
+   to −$94,314 (first-pool-≥2R target).
+4. Drawdown tolerable: **FAIL** (68% of the account).
+
+Before costs, the mechanical rules performed like a coin flip: on real data
+they matched the no-edge random-walk test. After fees and slippage (about
+$31/trade, since tight stops mean more contracts), they lose steadily.
+Choosing the least-bad variant would be curve-fitting to noise, because
+every variant is negative.
+
+Caveat: this tests *this* numeric reading of a discretionary method. A
+human trader's judgment (context, news, order flow) is not captured. What
+it does show is that the rules as written, automated, have no edge on
+10 years of NQ.
 
 ## The strategy, boiled down (as implemented)
 
