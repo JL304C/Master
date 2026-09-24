@@ -43,6 +43,27 @@ human trader's judgment (context, news, order flow) is not captured. What
 it does show is that the rules as written, automated, have no edge on
 10 years of NQ.
 
+### Re-test: major levels only (`--levels major`)
+
+In the first run, 88% of trades (247/281) swept minor 5-bar swings rather
+than the pools the strategy is built on. This re-test allows sweeps only of
+the Asian/London/prior-day highs/lows and equal highs/lows. It also **fails**:
+
+| | Result |
+|---|---|
+| Trades | **42 in 10 years** (~4/yr) |
+| Expectancy | −$33/trade (−0.22R), PF 0.83, net **−$1,367** |
+| Before any costs | +$476 total (≈ +$11/trade), wiped out by ~$34/trade costs |
+| 95% CI | −$142 … +$93 (includes zero) |
+| First / second half | −$1,131 / −$236. Both lose. |
+| Max drawdown | $2,492 (9.6%) |
+| Variants | 13 of 15 lose. London-only (+$379, 32 trades) and displacement 2.1× (+$178, 28 trades) are slightly positive, which is what noise produces when you test 15 variants on ~30 trades. |
+
+Conclusion: whether the levels are read broadly or strictly, the rules as
+written show no edge on 10 years of NQ that survives costs. Even if the
+strict version had a small edge, 4 trades a year could not be told apart
+from luck, or be worth automating.
+
 ## The strategy, boiled down (as implemented)
 
 All times are US/Eastern. Everything is on 1-minute bars.
