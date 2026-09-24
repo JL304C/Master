@@ -207,6 +207,7 @@ def synthetic_audit():
             for mult in (0.8, 1.2):
                 v = v0 * mult
                 if isinstance(v0, int): v = max(1, round(v))
+                else: v = round(v, 2)
                 sh = statistics.median(r['sharpe_daily'] for r in mc(replace(base, **{kw: v}), EDGE, seeds, pool))
                 sens[f'{name}={v}'] = sh
                 print(f"  {name}={v!s:6s} median Sharpe {sh:6.2f} ({(sh - b_sh) / abs(b_sh) * 100 if b_sh else 0:+.0f}%)")
@@ -265,7 +266,7 @@ def real_audit(path, tz, instrument):
     for kw in ('disp_mult', 'min_rr', 'confirm_bars', 'eq_tol_ticks', 'max_hold_bars'):
         v0 = getattr(base, kw)
         for m in (0.8, 1.2):
-            v = max(1, round(v0 * m)) if isinstance(v0, int) else v0 * m
+            v = max(1, round(v0 * m)) if isinstance(v0, int) else round(v0 * m, 2)
             variants.append((f'{kw}={v}', replace(base, **{kw: v})))
     variants += [('aggressive entry', replace(base, entry_mode='aggressive')),
                  ('target first>=2R', replace(base, target_mode='first_beyond')),
