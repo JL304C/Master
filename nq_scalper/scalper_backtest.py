@@ -72,6 +72,10 @@ class Config:
     use_london: bool = True
     use_ny: bool = True
     min_stop_pts: float = 3.0
+    # stop caps above are in points at NQ = STOP_REF_PRICE and scale with price,
+    # so a 30 pt cap at 24,000 becomes ~19 pts when NQ traded at 15,000
+    scale_stops: bool = True
+    stop_ref_price: float = 24000.0
 
     swing_strength: int = 5              # pivot = extreme of +/-5 bars
     eq_tol_ticks: int = 3                # equal highs/lows within 3 ticks
@@ -399,7 +403,9 @@ def run(bars, cfg=Config(), day_filter=None):
                                 entry_px = fvg[1] if side > 0 else fvg[0]
                                 ref_entry = entry_px
                             risk = (ref_entry - stop) * side
-                            ok = cfg.min_stop_pts <= risk <= max_stop
+                            k_px = C[i] / cfg.stop_ref_price if cfg.scale_stops else 1.0
+                            lo_cap, hi_cap = cfg.min_stop_pts * k_px, max_stop * k_px
+                            ok = lo_cap <= risk <= hi_cap
                             t1 = t2 = None
                             if ok:
                                 # opposing pools untaken as of bar i
@@ -427,7 +433,8 @@ def run(bars, cfg=Config(), day_filter=None):
                                 ok = qty >= 1
                             if ok:
                                 order = dict(side=side, px=entry_px, stop=stop, t1=t1, t2=t2, qty=qty,
-                                             placed=i, sig=i, level=s['level'], kind=s['kind'], wname=wname)
+                                             placed=i, sig=i, level=s['level'], kind=s['kind'], wname=wname,
+                                             lo_cap=lo_cap, hi_cap=hi_cap)
                                 state = 'PLACE_ENTRY'
                             else:
                                 state = 'WAIT_FOR_SWEEP'
@@ -442,7 +449,7 @@ def run(bars, cfg=Config(), day_filter=None):
                         filled_px = O[i] + side * slip
                         # re-validate risk at actual fill
                         risk = (filled_px - od['stop']) * side
-                        if risk < cfg.min_stop_pts * 0.5 or risk > max_stop * 1.25:
+                        if risk < od['lo_cap'] * 0.5 or risk > od['hi_cap'] * 1.25:
                             state, order = 'WAIT_FOR_SWEEP', None; i += 1; continue
                     else:
                         # fill needs a trade-through; cancel if T1 runs first or order expires

@@ -42,7 +42,9 @@ All times are US/Eastern. Everything is on 1-minute bars.
    first. *Aggressive*: a market order at the next bar's open.
 7. **Stop.** 1 tick beyond the sweep extreme. The trade is skipped if the stop
    is more than 20 pts away (London), more than 30 pts (NY), or less than
-   3 pts. The stop is never widened.
+   3 pts. These caps are set for NQ at 24,000 and scale with price (30 pts
+   becomes about 19 pts at NQ 15,000), so older years are tested fairly. The
+   stop is never widened.
 8. **Size.** `contracts = floor($260 / (stop_pts × $/pt))`. That is 1% of a
    $26,000 account on MNQ at $2/pt, capped at 50 contracts.
 9. **Targets.** T1 is the nearest untaken opposing liquidity: highs/lows,
