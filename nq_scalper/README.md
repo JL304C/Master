@@ -114,10 +114,20 @@ What the synthetic runs already reveal about the strategy itself:
 
 ## Getting the real answer (required before any live trading)
 
-1. **Get real 1-minute NQ bars, 3–5+ years.** Any source with OHLC works:
-   Databento (`GLBX.MDP3`, schema `ohlcv-1m`, symbol `NQ.c.0` continuous,
-   inexpensive pay-per-use), NinjaTrader, Sierra Chart, TradingView export,
-   FirstRate Data, and similar. The CSV needs a timestamp column plus
+1. **Get real 1-minute NQ bars, 3–5+ years.** On the Databento website
+   (Batch download):
+   - **Dataset:** CME Globex MDP 3.0.
+   - **Product:** "NQ • E-mini Nasdaq-100 Futures". The website can't select
+     the continuous `NQ.c.0` symbol (only the API can), and it doesn't need
+     to: the loader keeps only the highest-volume contract each session (the
+     front month) and drops the other expiries and spreads.
+   - **Schema:** OHLCV-1m. Not Trades, which is about 100× larger.
+   - **Encoding:** CSV. **Compression:** none. Turn on "map symbols" and the
+     pretty timestamps/prices options if offered. The loader copes either
+     way.
+
+   Other OHLC sources (NinjaTrader, Sierra Chart, TradingView export,
+   FirstRate Data) also work. The CSV needs a timestamp column plus
    open/high/low/close.
 2. **Run it:**
    ```powershell
@@ -146,8 +156,8 @@ What the synthetic runs already reveal about the strategy itself:
   it. Add a skip-date list before relying on the results.
 - **Queue position** beyond the 1-tick trade-through rule, partial fills, and
   latency.
-- **Data quality**: roll-day gaps in continuous contracts and bad ticks. The
-  loader only removes duplicate minutes.
+- **Data quality**: the price jump on roll days (the front month switches
+  on the highest-volume day, with no back-adjustment) and bad ticks.
 - **Some partial rules**: "break of a local swing" on the displacement candle,
   and the trailing stop on the runner (the runner uses T2, break-even, or a
   60-minute time stop instead).

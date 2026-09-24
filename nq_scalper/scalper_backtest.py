@@ -123,10 +123,12 @@ def load_csv(path, tz='America/New_York'):
         rd = csv.DictReader(f)
         cols = {k.lower().strip(): k for k in rd.fieldnames}
         tcol = next(cols[k] for k in ('ts_event', 'timestamp', 'datetime', 'time', 'date') if k in cols)
-        sym_col = cols.get('symbol')
+        # a multi-contract export (e.g. Databento "NQ" product = every expiry + spreads)
+        # is reduced to the front month below; single-series files pass through
+        ccol = cols.get('symbol') or cols.get('instrument_id')
+        vcol = cols.get('volume')
+        scale = None
         for r in rd:
-            if sym_col and ('-' in r[sym_col]):  # skip calendar spreads in Databento exports
-                continue
             raw = r[tcol].strip()
             if raw.isdigit():                    # unix ns / s
                 v = int(raw)
@@ -140,14 +142,29 @@ def load_csv(path, tz='America/New_York'):
                     raw = head.split('.')[0] + '+' + tail
                 d = datetime.fromisoformat(raw)
             d = conv(d) if conv else d.replace(tzinfo=None)
-            rows.append((d, float(r[cols['open']]), float(r[cols['high']]),
-                         float(r[cols['low']]), float(r[cols['close']])))
+            px = [float(r[cols[k]]) for k in ('open', 'high', 'low', 'close')]
+            if scale is None:                    # Databento raw fixed-point prices are 1e-9 units
+                scale = 1e-9 if abs(px[3]) > 1e8 else 1.0
+            px = [p * scale for p in px]
+            rows.append((d, *px, r[ccol] if ccol else '', float(r[vcol] or 0) if vcol else 0.0))
+    if ccol and len({x[5] for x in rows}) > 1:
+        # front month = the contract with the most volume in each futures session
+        vol = {}
+        for (d, o, h, l, c, k, v) in rows:
+            key = ((d + timedelta(hours=6)).date(), k)
+            vol[key] = vol.get(key, 0.0) + v
+        front = {}
+        for (sd, k), v in vol.items():
+            if v > front.get(sd, ('', -1))[1]:
+                front[sd] = (k, v)
+        rows = [x for x in rows if front[(x[0] + timedelta(hours=6)).date()][0] == x[5]]
+        rolls = [sd for sd, prev in zip(sorted(front)[1:], sorted(front)) if front[sd][0] != front[prev][0]]
+        print(f"multi-contract file: kept the front month per session ({len(rolls)} rolls)", file=sys.stderr)
     rows.sort(key=lambda x: x[0])
-    # de-dup (keep first per minute -- front-month in a continuous export)
     out, last = [], None
-    for row in rows:
+    for row in rows:                             # de-dup identical minutes
         if row[0] != last:
-            out.append(row); last = row[0]
+            out.append(row[:5]); last = row[0]
     return Bars(*[list(x) for x in zip(*out)])
 
 
