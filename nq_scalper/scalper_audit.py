@@ -239,10 +239,11 @@ def bootstrap_ci(xs, n=2000, seed=0):
     return ms[int(n * .025)], ms[int(n * .975)]
 
 
-def real_audit(path, tz, instrument):
+def real_audit(path, tz, instrument, levels='all'):
     bars = load_csv(path, tz)
     print(f"loaded {bars.n} bars {bars.ts[0]} .. {bars.ts[-1]} (ET)")
-    base = Config(instrument=instrument)
+    base = Config(instrument=instrument, sweep_levels=levels)
+    print(f"sweep levels: {levels}")
     tr, d = run(bars, base)
     s = summarize(tr, d, base)
     print("\n=== FULL SAMPLE (net of costs) ===")
@@ -284,9 +285,11 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser()
     ap.add_argument('--csv'); ap.add_argument('--tz', default='America/New_York')
     ap.add_argument('--instrument', default='MNQ')
+    ap.add_argument('--levels', default='all', choices=['all', 'major'],
+                    help="'major' = only Asian/London/prior-day highs/lows and equal highs/lows can be swept")
     a = ap.parse_args()
     if a.csv:
-        real_audit(a.csv, a.tz, a.instrument)
+        real_audit(a.csv, a.tz, a.instrument, a.levels)
     else:
         res = synthetic_audit()
         print("\nSUMMARY:", json.dumps({k: v for k, v in res.items() if k != 'sensitivity'}, default=str))

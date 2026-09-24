@@ -90,6 +90,9 @@ class Config:
     entry_mode: str = 'conservative'     # 'conservative' (retest limit) | 'aggressive'
     retest_bars: int = 10
     min_rr: float = 2.0
+    sweep_levels: str = 'all'            # 'all' | 'major': only Asian/London/prior-day
+                                         # highs/lows and equal-high/low clusters can be
+                                         # swept (single 5-bar swings still count as targets)
     target_mode: str = 'nearest'         # 'nearest' (literal: nearest pool must be >=2R)
                                          # | 'first_beyond' (first pool that is >=2R)
     partial_frac: float = 0.5
@@ -397,8 +400,12 @@ def run(bars, cfg=Config(), day_filter=None):
                 in_win = i <= w1
                 # current levels = static + pivots confirmed by bar i-1
                 if state == 'WAIT_FOR_SWEEP' and in_win and not locked and attempts < cfg.max_attempts_per_window:
-                    lv_buy = buy + [(p, 'SWING_H', pi) for (ci, pi, p) in win_ph if ci < i]
-                    lv_sell = sell + [(p, 'SWING_L', pi) for (ci, pi, p) in win_pl if ci < i]
+                    if cfg.sweep_levels == 'major':
+                        lv_buy = [x for x in buy if x[1] != 'SWING_H']
+                        lv_sell = [x for x in sell if x[1] != 'SWING_L']
+                    else:
+                        lv_buy = buy + [(p, 'SWING_H', pi) for (ci, pi, p) in win_ph if ci < i]
+                        lv_sell = sell + [(p, 'SWING_L', pi) for (ci, pi, p) in win_pl if ci < i]
                     # SELL-SIDE sweep -> long setup
                     cand = []
                     for (p, kind, fi) in lv_sell:
@@ -588,6 +595,9 @@ def summarize(trades, daily, cfg=Config()):
     by_win = {}
     for t in trades:
         b = by_win.setdefault(t.window, [0, 0.0]); b[0] += 1; b[1] += t.pnl
+    by_lvl = {}
+    for t in trades:
+        b = by_lvl.setdefault(t.level_kind, [0, 0.0]); b[0] += 1; b[1] += t.pnl
     return dict(
         n_trades=len(trades), days=len(dvals), trades_per_day=len(trades) / max(1, len(dvals)),
         win_rate=len(wins) / len(pnl), avg_win=statistics.mean(wins) if wins else 0.0,
@@ -598,6 +608,7 @@ def summarize(trades, daily, cfg=Config()):
         fees_and_slip=sum(t.gross for t in trades) - sum(pnl),
         max_dd_usd=mdd, max_dd_pct_acct=mdd / cfg.account, sharpe_daily=sharpe,
         exits=reasons, by_window={k: dict(n=v[0], pnl=round(v[1], 2)) for k, v in by_win.items()},
+        by_level={k: dict(n=v[0], pnl=round(v[1], 2)) for k, v in sorted(by_lvl.items(), key=lambda kv: -kv[1][0])},
     )
 
 
