@@ -47,8 +47,10 @@ exports work as-is (ts_event in UTC -> pass --tz UTC).  Bar timestamps are
 treated as bar OPEN times.
 """
 import csv, math, statistics, sys, json, argparse
+from array import array
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, time as dtime, timezone
+from datetime import date, datetime, timedelta, time as dtime, timezone
 
 # ---------------------------------------------------------------- config
 INSTRUMENTS = {
@@ -102,74 +104,134 @@ class Config:
 
 
 # ---------------------------------------------------------------- data
+_EPOCH = datetime(1970, 1, 1)
+_EPOCH_ORD = _EPOCH.toordinal()
+_ONE_MIN = timedelta(minutes=1)
+
+
+class _TsView:
+    """Timestamps stored as ET wall-clock minutes since 1970; datetimes built on access."""
+    def __init__(self, m): self.m = m
+    def __len__(self): return len(self.m)
+    def __getitem__(self, i):
+        if isinstance(i, slice): return _TsView(self.m[i])
+        return _EPOCH + timedelta(minutes=self.m[i])
+
+
 class Bars:
-    """Column-oriented 1-minute bars with ET timestamps (naive, ET wall clock)."""
+    """Column-oriented 1-minute bars, ET wall clock, stored in compact arrays
+    (~50 bytes/bar, so 10 years of NQ fits in a few hundred MB).
+      tod   = minute of day (0..1439)
+      cdate = calendar date ordinal
+      sdate = futures session date ordinal (18:00 ET starts the next day's session)"""
     def __init__(self, ts, o, h, l, c):
-        self.ts, self.o, self.h, self.l, self.c = ts, o, h, l, c
-        self.n = len(ts)
-        # futures session date: 18:00 ET starts the next day's session
-        self.sdate = [(t + timedelta(hours=6)).date() for t in ts]
-        self.tod = [t.time() for t in ts]
+        if isinstance(ts, _TsView): m = ts.m
+        elif isinstance(ts, array): m = ts
+        else: m = array('q', ((t - _EPOCH) // _ONE_MIN for t in ts))
+        self.m, self.ts = m, _TsView(m)
+        self.o, self.h, self.l, self.c = [x if isinstance(x, array) else array('d', x) for x in (o, h, l, c)]
+        self.n = len(m)
+        self.tod = array('h', (x % 1440 for x in m))
+        self.cdate = array('l', (x // 1440 + _EPOCH_ORD for x in m))
+        self.sdate = array('l', ((x + 360) // 1440 + _EPOCH_ORD for x in m))
 
     def slice(self, end):
-        return Bars(self.ts[:end], self.o[:end], self.h[:end], self.l[:end], self.c[:end])
+        return Bars(self.m[:end], self.o[:end], self.h[:end], self.l[:end], self.c[:end])
+
+
+def _row_reader(path, tz):
+    """Yields (et_minute, o, h, l, c, contract, volume) without keeping rows in memory."""
+    et = None
+    if tz not in ('America/New_York', 'ET', 'EST', 'US/Eastern'):
+        from zoneinfo import ZoneInfo        # Windows: pip install tzdata
+        et = ZoneInfo('America/New_York')
+        src = timezone.utc if tz == 'UTC' else ZoneInfo(tz)
+    off_cache = {}
+
+    def utc_to_et(umin):                     # ET offset cached per UTC hour
+        k = umin // 60
+        off = off_cache.get(k)
+        if off is None:
+            off = int(datetime.fromtimestamp(k * 3600, et).utcoffset().total_seconds() // 60)
+            off_cache[k] = off
+        return umin + off
+
+    with open(path, newline='') as f:
+        rd = csv.reader(f)
+        header = [x.lower().strip() for x in next(rd)]
+        col = {k: j for j, k in enumerate(header)}
+        tj = next(col[k] for k in ('ts_event', 'timestamp', 'datetime', 'time', 'date') if k in col)
+        oj, hj, lj, cj = col['open'], col['high'], col['low'], col['close']
+        kj = col.get('symbol', col.get('instrument_id'))
+        vj = col.get('volume')
+        scale = None
+        for r in rd:
+            if not r: continue
+            raw = r[tj].strip()
+            if raw.isdigit():                # unix ns / s, always UTC
+                if et is None:
+                    raise SystemExit('numeric timestamps are UTC -- pass --tz UTC')
+                v = int(raw)
+                emin = utc_to_et((v // 1_000_000_000 if v > 1e12 else v) // 60)
+            else:
+                utc_suffix = raw.endswith('Z') or raw.endswith('+00:00')
+                if et is None or (tz == 'UTC' and (utc_suffix or len(raw) <= 19)):
+                    # fast path: YYYY-MM-DD[T ]HH:MM...
+                    mins = (date(int(raw[0:4]), int(raw[5:7]), int(raw[8:10])).toordinal() - _EPOCH_ORD) * 1440 \
+                        + int(raw[11:13]) * 60 + int(raw[14:16])
+                    emin = mins if et is None else utc_to_et(mins)
+                else:
+                    raw = raw.replace('Z', '+00:00')
+                    if '.' in raw and '+' in raw:
+                        head, tail = raw.split('+', 1)
+                        raw = head.split('.')[0] + '+' + tail
+                    d = datetime.fromisoformat(raw)
+                    d = (d.replace(tzinfo=src) if d.tzinfo is None else d).astimezone(et).replace(tzinfo=None)
+                    emin = (d - _EPOCH) // _ONE_MIN
+            o, h, l, c = float(r[oj]), float(r[hj]), float(r[lj]), float(r[cj])
+            if scale is None:                # Databento raw fixed-point prices are 1e-9 units
+                scale = 1e-9 if abs(c) > 1e8 else 1.0
+            if scale != 1.0:
+                o, h, l, c = o * scale, h * scale, l * scale, c * scale
+            yield (emin, o, h, l, c, r[kj] if kj is not None else '',
+                   float(r[vj] or 0) if vj is not None else 0.0)
 
 
 def load_csv(path, tz='America/New_York'):
-    """Loads OHLC 1-min CSV. tz = timezone of the timestamps in the file."""
-    conv = None
-    if tz not in ('America/New_York', 'ET', 'EST', 'US/Eastern'):
-        from zoneinfo import ZoneInfo        # Windows: pip install tzdata
-        src, et = ZoneInfo(tz) if tz != 'UTC' else timezone.utc, ZoneInfo('America/New_York')
-        conv = lambda d: (d.replace(tzinfo=src) if d.tzinfo is None else d).astimezone(et).replace(tzinfo=None)
-    rows = []
-    with open(path, newline='') as f:
-        rd = csv.DictReader(f)
-        cols = {k.lower().strip(): k for k in rd.fieldnames}
-        tcol = next(cols[k] for k in ('ts_event', 'timestamp', 'datetime', 'time', 'date') if k in cols)
-        # a multi-contract export (e.g. Databento "NQ" product = every expiry + spreads)
-        # is reduced to the front month below; single-series files pass through
-        ccol = cols.get('symbol') or cols.get('instrument_id')
-        vcol = cols.get('volume')
-        scale = None
-        for r in rd:
-            raw = r[tcol].strip()
-            if raw.isdigit():                    # unix ns / s
-                v = int(raw)
-                d = datetime.fromtimestamp(v / 1e9 if v > 1e12 else v, timezone.utc)
-                if conv is None:
-                    raise SystemExit('numeric timestamps are UTC -- pass --tz UTC')
-            else:
-                raw = raw.replace('Z', '+00:00')
-                if '.' in raw and '+' in raw:    # trim ns precision
-                    head, tail = raw.split('+', 1)
-                    raw = head.split('.')[0] + '+' + tail
-                d = datetime.fromisoformat(raw)
-            d = conv(d) if conv else d.replace(tzinfo=None)
-            px = [float(r[cols[k]]) for k in ('open', 'high', 'low', 'close')]
-            if scale is None:                    # Databento raw fixed-point prices are 1e-9 units
-                scale = 1e-9 if abs(px[3]) > 1e8 else 1.0
-            px = [p * scale for p in px]
-            rows.append((d, *px, r[ccol] if ccol else '', float(r[vcol] or 0) if vcol else 0.0))
-    if ccol and len({x[5] for x in rows}) > 1:
-        # front month = the contract with the most volume in each futures session
-        vol = {}
-        for (d, o, h, l, c, k, v) in rows:
-            key = ((d + timedelta(hours=6)).date(), k)
-            vol[key] = vol.get(key, 0.0) + v
-        front = {}
+    """Loads OHLC 1-min CSV. tz = timezone of the timestamps in the file.
+    A multi-contract export (e.g. the Databento "NQ" product = every expiry
+    plus spreads) is reduced to the front month: the contract with the most
+    volume in each futures session.  Two passes over the file keep memory low."""
+    vol, contracts = {}, set()
+    for (emin, o, h, l, c, k, v) in _row_reader(path, tz):
+        key = ((emin + 360) // 1440, k)
+        vol[key] = vol.get(key, 0.0) + v
+        contracts.add(k)
+    front = None
+    if len(contracts) > 1:
+        best = {}
         for (sd, k), v in vol.items():
-            if v > front.get(sd, ('', -1))[1]:
-                front[sd] = (k, v)
-        rows = [x for x in rows if front[(x[0] + timedelta(hours=6)).date()][0] == x[5]]
-        rolls = [sd for sd, prev in zip(sorted(front)[1:], sorted(front)) if front[sd][0] != front[prev][0]]
-        print(f"multi-contract file: kept the front month per session ({len(rolls)} rolls)", file=sys.stderr)
-    rows.sort(key=lambda x: x[0])
-    out, last = [], None
-    for row in rows:                             # de-dup identical minutes
-        if row[0] != last:
-            out.append(row[:5]); last = row[0]
-    return Bars(*[list(x) for x in zip(*out)])
+            if v > best.get(sd, ('', -1.0))[1]:
+                best[sd] = (k, v)
+        front = {sd: kv[0] for sd, kv in best.items()}
+        days = sorted(front)
+        rolls = sum(1 for a, b in zip(days, days[1:]) if front[a] != front[b])
+        print(f"multi-contract file: kept the front month per session ({rolls} rolls)", file=sys.stderr)
+    del vol
+    m, O, H, L, C = array('q'), array('d'), array('d'), array('d'), array('d')
+    for (emin, o, h, l, c, k, v) in _row_reader(path, tz):
+        if front is not None and front[(emin + 360) // 1440] != k:
+            continue
+        m.append(emin); O.append(o); H.append(h); L.append(l); C.append(c)
+    if any(m[i] >= m[i + 1] for i in range(len(m) - 1)):     # sort + de-dup identical minutes
+        order = sorted(range(len(m)), key=m.__getitem__)
+        keep, last = [], None
+        for i in order:
+            if m[i] != last:
+                keep.append(i); last = m[i]
+        m = array('q', (m[i] for i in keep))
+        O, H, L, C = [array('d', (x[i] for i in keep)) for x in (O, H, L, C)]
+    return Bars(m, O, H, L, C)
 
 
 # ---------------------------------------------------------------- helpers
@@ -199,8 +261,7 @@ def hourly_fvgs(bars, upto, start):
     completed hours."""
     hours, cur, key = [], None, None
     for i in range(start, upto):
-        t = bars.ts[i]
-        k = (t.date(), t.hour)
+        k = (bars.cdate[i], bars.tod[i] // 60)
         if k != key:
             if cur: hours.append(cur)
             cur, key = [bars.h[i], bars.l[i]], k
@@ -237,6 +298,11 @@ def run(bars, cfg=Config(), day_filter=None):
     n = bars.n
     H, L, O, C = bars.h, bars.l, bars.o, bars.c
     ph_all, pl_all = pivots(bars, cfg.swing_strength)
+    # pivots are appended in bar order, so both index columns are sorted -> bisect
+    ph_pi = [x[1] for x in ph_all]; ph_ci = [x[0] for x in ph_all]
+    pl_pi = [x[1] for x in pl_all]; pl_ci = [x[0] for x in pl_all]
+    M = lambda t: t.hour * 60 + t.minute          # dtime -> minute of day
+    TOD = bars.tod
 
     # index sessions
     sess = {}                               # sdate -> (first_idx, last_idx)
@@ -259,12 +325,12 @@ def run(bars, cfg=Config(), day_filter=None):
         # prior RTH close = close of last bar before 16:00 in prev session
         rth_close = None
         for i in range(prev[1], prev[0] - 1, -1):
-            if bars.tod[i] < dtime(16, 0) and bars.tod[i] >= dtime(9, 30):
+            if 570 <= TOD[i] < 960:               # 09:30-16:00
                 rth_close = C[i]; break
 
-        asian = [i for i in range(s0, s1 + 1) if in_range(bars.tod[i], dtime(20, 0), dtime(0, 0))]
-        midnight_idx = next((i for i in range(s0, s1 + 1) if bars.tod[i] >= dtime(0, 0) and bars.ts[i].date() == d), None)
-        london_idx = [i for i in range(s0, s1 + 1) if in_range(bars.tod[i], dtime(2, 0), dtime(5, 0))]
+        asian = [i for i in range(s0, s1 + 1) if TOD[i] >= 1200]                  # 20:00-24:00
+        midnight_idx = next((i for i in range(s0, s1 + 1) if bars.cdate[i] == d), None)
+        london_idx = [i for i in range(s0, s1 + 1) if 120 <= TOD[i] < 300]        # 02:00-05:00
 
         windows = []
         if cfg.use_london: windows.append(cfg.london)
@@ -272,8 +338,8 @@ def run(bars, cfg=Config(), day_filter=None):
         locked = False
         for (wname, wstart, wend, max_stop) in windows:
             if locked: break
-            widx = [i for i in range(s0, s1 + 1) if in_range(bars.tod[i], wstart, wend)
-                    and bars.ts[i].date() == d]
+            ws, we = M(wstart), M(wend)
+            widx = [i for i in range(s0, s1 + 1) if in_range(TOD[i], ws, we) and bars.cdate[i] == d]
             if not widx: continue
             w0, w1 = widx[0], widx[-1]
 
@@ -295,8 +361,8 @@ def run(bars, cfg=Config(), day_filter=None):
                 if li:
                     buy.append((max(H[i] for i in li), 'LON_H', li[-1]))
                     sell.append((min(L[i] for i in li), 'LON_L', li[-1]))
-            sw_h = [(p, 'SWING_H', pi) for (ci, pi, p) in ph_all if s0 <= pi and ci < w0]
-            sw_l = [(p, 'SWING_L', pi) for (ci, pi, p) in pl_all if s0 <= pi and ci < w0]
+            sw_h = [(p, 'SWING_H', pi) for (ci, pi, p) in ph_all[bisect_left(ph_pi, s0):bisect_left(ph_ci, w0)]]
+            sw_l = [(p, 'SWING_L', pi) for (ci, pi, p) in pl_all[bisect_left(pl_pi, s0):bisect_left(pl_ci, w0)]]
             # equal highs/lows: clusters of >=2 swing pivots within tol
             tol = cfg.eq_tol_ticks * tick
             for src, dst, kind, pick in ((sw_h, buy, 'EQH', max), (sw_l, sell, 'EQL', min)):
@@ -316,8 +382,8 @@ def run(bars, cfg=Config(), day_filter=None):
             for lo_, hi_ in bull1h + bear1h: ref += [lo_, hi_]
 
             # dynamic in-window pivots (known only after confirmation)
-            win_ph = [(ci, pi, p) for (ci, pi, p) in ph_all if w0 <= ci <= w1 + cfg.max_hold_bars]
-            win_pl = [(ci, pi, p) for (ci, pi, p) in pl_all if w0 <= ci <= w1 + cfg.max_hold_bars]
+            win_ph = ph_all[bisect_left(ph_ci, w0):bisect_right(ph_ci, w1 + cfg.max_hold_bars)]
+            win_pl = pl_all[bisect_left(pl_ci, w0):bisect_right(pl_ci, w1 + cfg.max_hold_bars)]
 
             consumed = set()
             attempts = 0
@@ -460,7 +526,7 @@ def run(bars, cfg=Config(), day_filter=None):
                             state, order = 'WAIT_FOR_SWEEP', None; i += 1; continue
                     if filled_px is not None:
                         attempts += 1
-                        pos = Trade(side=side, window=od['wname'], day=str(d), sweep_level=od['level'],
+                        pos = Trade(side=side, window=od['wname'], day=str(date.fromordinal(d)), sweep_level=od['level'],
                                     level_kind=od['kind'], signal_idx=od['sig'], entry_idx=i, entry=filled_px,
                                     stop=od['stop'], t1=od['t1'], t2=od['t2'], contracts=od['qty'],
                                     init_stop=od['stop'])

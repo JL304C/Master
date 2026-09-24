@@ -29,7 +29,7 @@ out-of-sample split and a bootstrap confidence interval on expectancy.
 """
 import math, random, statistics, json, sys, argparse
 from dataclasses import replace
-from datetime import datetime, timedelta, time as dtime
+from datetime import date, datetime, timedelta, time as dtime
 from multiprocessing import Pool
 
 from scalper_backtest import Bars, Config, run, summarize, load_csv, in_range
@@ -156,14 +156,15 @@ def lookahead_test():
         for cut_day in (50, 100, 140):
             target = days[cut_day]
             cut = b.sdate.index(target)          # first bar of that session
-            past = [key(t) for t in full if t.day < str(target)]
+            cut_day_str = str(date.fromordinal(target))
+            past = [key(t) for t in full if t.day < cut_day_str]
             part, _ = run(b.slice(cut), cfg)
             rnd = random.Random(cut)
-            jig = lambda xs, d: xs[:cut] + [x + d * rnd.choice((1, -1)) for x in xs[cut:]]
-            sc = Bars(b.ts, jig(b.o, 40), b.h[:cut] + [x + 60 for x in b.h[cut:]],
-                      b.l[:cut] + [x - 60 for x in b.l[cut:]], jig(b.c, 40))
+            jig = lambda xs, d: list(xs[:cut]) + [x + d * rnd.choice((1, -1)) for x in xs[cut:]]
+            sc = Bars(b.ts, jig(b.o, 40), list(b.h[:cut]) + [x + 60 for x in b.h[cut:]],
+                      list(b.l[:cut]) + [x - 60 for x in b.l[cut:]], jig(b.c, 40))
             scr, _ = run(sc, cfg)
-            same = past == [key(t) for t in part if t.day < str(target)] == [key(t) for t in scr if t.day < str(target)]
+            same = past == [key(t) for t in part if t.day < cut_day_str] == [key(t) for t in scr if t.day < cut_day_str]
             ok &= same; n_cmp += len(past)
             if not same:
                 print(f"  seed {seed} cut {cut_day}: MISMATCH")
