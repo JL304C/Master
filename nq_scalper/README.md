@@ -69,4 +69,85 @@ Fills are deliberately pessimistic:
 - `requirements.txt` — `tzdata` only (needed on Windows for UTC timestamps).
   Otherwise the code uses only the standard library.
 
-RESULTS_PLACEHOLDER
+## Audit results (synthetic data — this tests the engine, not the market)
+
+Run with `python scalper_audit.py` (takes about 20 minutes on 4 cores). Each
+path is one year (250 sessions) of 1-minute NQ-like bars: 22% annual vol,
+fat tails, a quiet Asian session and a volatile NY open. Account size is
+$26k, trading MNQ at 1% risk.
+
+| Test | Result |
+|---|---|
+| 0. Lookahead check (truncate or scramble the future; the past must not change) | **PASS**: 77 trades identical across 9 cuts |
+| 1. Null test: random walk with no edge, 40 years | Median **−$46/trade**, **−$1,800/yr**, Sharpe −0.65. The engine is not biased toward profits. |
+| 2. Positive control: planted stop-hunt reversal, 40 years | Median **+$91/trade**, +$2,800/yr, Sharpe 1.04, 82% of years profitable. The engine does detect a real edge when one exists. |
+| 3. Cost drag | $16/trade = **0.06R**, the minimum real edge needed just to break even |
+
+What the synthetic runs already reveal about the strategy itself:
+
+- **Luck can look like an edge.** With zero edge, **30% of one-year runs
+  still made money** (the top 5% made +$4,600). A profitable year of
+  backtesting or paper trading proves nothing on its own.
+- **Signals are rare.** All the required conditions happen in sequence only
+  about **30–50 times a year** (≈0.15 per day), not several scalps a day.
+  Per-trade results are very noisy (σ ≈ 2R). Confirming a +0.2R edge at
+  roughly 2 standard errors takes about **400 trades (≈10 years of data)**.
+  A +0.3R edge takes about 180 trades (≈4–5 years). Months of data is not
+  enough.
+- **Limit-retest fills carry adverse selection.** Even with zero fees, the
+  null test loses −0.11R per trade gross. A limit order only fills when price
+  trades through it, so it tends to fill on the trades that keep going
+  against you. This is real-world behavior, not a bug.
+- **Fragile parameters.** A ±20% change in the displacement threshold moved
+  Sharpe by −56% to +69%. `min_rr` moved it −23% to +36%. Other parameters
+  moved it ≤12%. Anything that sensitive has to be re-checked on real data
+  and must not be tuned to one sample.
+- **"Nearest pool must be ≥2R" is what holds it together.** Loosening it to
+  "first pool that is ≥2R" quadruples the trade count and turns the planted
+  edge into a loss (−$34/trade).
+- **The NY stop cap may be too tight.** With a 30 pt cap, NY produced only
+  about 7 trades a year, because NY-open sweeps usually need wider stops.
+  Calibrate the caps on real data.
+- In this planted-edge model, aggressive entry beat the retest by a wide
+  margin. That result belongs to how the edge was planted (it reverses
+  immediately) and may not carry over to real data.
+
+## Getting the real answer (required before any live trading)
+
+1. **Get real 1-minute NQ bars, 3–5+ years.** Any source with OHLC works:
+   Databento (`GLBX.MDP3`, schema `ohlcv-1m`, symbol `NQ.c.0` continuous,
+   inexpensive pay-per-use), NinjaTrader, Sierra Chart, TradingView export,
+   FirstRate Data, and similar. The CSV needs a timestamp column plus
+   open/high/low/close.
+2. **Run it:**
+   ```powershell
+   pip install tzdata
+   python scalper_audit.py --csv NQ_1min.csv --tz UTC        # Databento timestamps are UTC
+   python scalper_backtest.py --csv NQ_1min.csv --tz UTC --trades-out trades.csv
+   ```
+   Use `--tz America/Chicago` for CME-local exports, or leave it off if the
+   timestamps are already Eastern. The audit prints full-sample stats, a
+   bootstrap 95% CI on expectancy, first-half vs second-half results, and the
+   ±20% sensitivity and variant table. `trades.csv` lists every trade, so you
+   can check them against a chart.
+3. **Decision rule** (set now, before seeing the results):
+   - Proceed to paper trading only if **both halves** are net-positive after
+     costs.
+   - The bootstrap CI must **exclude zero**.
+   - No ±20% change may flip the result to a loss.
+   - Max drawdown must be tolerable at your risk per trade.
+   - Anything less means the strategy is unproven. Do not optimize parameters
+     until it passes; that only fits noise.
+
+## Not modeled
+
+- **Economic news** (CPI, NFP, FOMC): the spec says to avoid scheduled
+  high-impact news. There is no calendar here, so the backtest trades through
+  it. Add a skip-date list before relying on the results.
+- **Queue position** beyond the 1-tick trade-through rule, partial fills, and
+  latency.
+- **Data quality**: roll-day gaps in continuous contracts and bad ticks. The
+  loader only removes duplicate minutes.
+- **Some partial rules**: "break of a local swing" on the displacement candle,
+  and the trailing stop on the runner (the runner uses T2, break-even, or a
+  60-minute time stop instead).
