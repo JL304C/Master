@@ -72,7 +72,11 @@ def main():
         sys.exit(1)
     client = db.Historical(key)
 
-    end = client.metadata.get_dataset_range(dataset=DATASET)["end"]
+    # Use the end of the ohlcv-1d schema, not of the whole dataset: the dataset's end
+    # includes today's intraday data, but daily bars stop at the last completed day, and
+    # asking past that is rejected (422 data_schema_not_fully_available).
+    rng = client.metadata.get_dataset_range(dataset=DATASET)
+    end = (rng.get("schema", {}).get("ohlcv-1d", {}).get("end") or rng["end"])[:10]
     cost = client.metadata.get_cost(dataset=DATASET, symbols=[SYMBOL], schema="ohlcv-1d",
                                     start=START, end=end)
     print(f"{DATASET} {SYMBOL} ohlcv-1d {START} .. {end}: estimated cost ${cost:,.2f}")
