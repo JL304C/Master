@@ -99,9 +99,13 @@ announces the real ones.
 
 ## Setup (Windows, same as the GPC bot)
 1. Run `pip install alpaca-py`.
-2. Copy this whole folder to your computer, e.g. `C:\Users\jeffl\nvda_delayed_condor\`. The bot needs `condor_rules.py` and both
-   earnings files next to it.
-3. Create a `.env` file there with your **paper** keys (see `.env.example`).
+2. Copy this whole folder to your computer as its **own folder**, e.g. `C:\Users\jeffl\nvda_delayed_condor\`. Don't put it in
+   the NVDA bull call spread bot's folder: each bot reads the `.env` and writes its logs next to itself. The bot needs
+   `condor_rules.py` and both earnings files beside it.
+3. Create a `.env` file there with your **paper** keys (see `.env.example`). Keys from a **second Alpaca paper account** are
+   recommended. The bull call spread bot also trades NVDA options and treats *every* NVDA option position on its account as
+   its own, so it could misread or close this bot's legs. (This bot is protected the other way round: it only touches
+   contracts recorded in its own log, so **don't delete `nvda_condor_log.jsonl`**.)
 4. Make sure your paper account is approved for **options level 3** (spreads). Check in Alpaca's paper dashboard.
 5. For the first test run, use `python nvda_condor_bot.py --dry-run`. It makes every decision and logs it to
    `nvda_condor_log.jsonl` / `nvda_condor_trades.csv`, but submits nothing. To check today's entry signal on a day other

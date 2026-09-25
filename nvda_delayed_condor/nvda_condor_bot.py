@@ -16,9 +16,12 @@ signal rules (condor_rules.py):
      spread. On expiration day, close any spread whose short strike is within $1 of
      the price (avoids surprise assignment); otherwise let both expire.
 
-State is derived from the Alpaca account each run (open option positions/orders). The
-only thing read back from the local log is the NVDA price at put entry (for the
-"has risen" test) and whether the call side was already added.
+State is derived from the Alpaca account each run (open option positions/orders), but
+ONLY for contracts this bot opened, as recorded in its own log -- so it can share an
+account with another NVDA options bot without touching that bot's positions. (Keep the
+log file: it is how the bot recognises its own positions.) The log also supplies the
+NVDA price at put entry (for the "has risen" test) and whether the call side was
+already added.
 
 Paper trading only: paper=True is hard-coded. Run once per trading day ~3:45 PM ET.
 First run:  python nvda_condor_bot.py --dry-run   (decides and logs, submits nothing)
@@ -245,12 +248,31 @@ def parse_occ(occ: str) -> dict:
 # --------------------------------------------------------------------------- #
 # account state
 # --------------------------------------------------------------------------- #
-def option_positions() -> dict:
-    """Groups our NVDA option legs: {'short_put','long_put','short_call','long_call'} ->
-    dict(symbol, strike, expiration, qty) (qty positive)."""
-    legs = {}
+def own_symbols() -> set[str]:
+    """Option symbols THIS bot opened (from its own log). Anything else on the account --
+    e.g. the NVDA bull call spread bot's legs -- is never read or touched by this bot."""
+    out = set()
+    for action in ("open_put_spread", "open_call_spread"):
+        for e in past_events(action):
+            out.update(e.get("legs", "").split("/"))
+    out.discard("")
+    return out
+
+
+def is_nvda_option(sym: str) -> bool:
+    return sym.startswith(SYMBOL) and len(sym) > len(SYMBOL) + 6
+
+
+def option_positions(mine: set[str]) -> tuple[dict, list[str]]:
+    """Groups this bot's NVDA option legs: {'short_put','long_put','short_call','long_call'}
+    -> dict(symbol, strike, expiration, qty) (qty positive). Also returns the NVDA option
+    symbols held that this bot did NOT open (left alone)."""
+    legs, foreign = {}, []
     for p in trade_client.get_all_positions():
-        if not (p.symbol.startswith(SYMBOL) and len(p.symbol) > len(SYMBOL) + 6):
+        if not is_nvda_option(p.symbol):
+            continue
+        if p.symbol not in mine:
+            foreign.append(p.symbol)
             continue
         o = parse_occ(p.symbol)
         if o["underlying"] != SYMBOL:
@@ -261,15 +283,16 @@ def option_positions() -> dict:
             legs.setdefault("extra", []).append(p.symbol)
             continue
         legs[key] = dict(symbol=p.symbol, strike=o["strike"], expiration=o["expiration"], qty=abs(qty))
-    return legs
+    return legs, foreign
 
 
-def open_option_orders() -> list:
+def open_option_orders(mine: set[str]) -> list:
+    """Still-open orders on this bot's own contracts (another bot's orders are ignored)."""
     orders = trade_client.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN, nested=True))
     out = []
     for o in orders:
         syms = [o.symbol or ""] + [l.symbol for l in (o.legs or [])]
-        if any(s.startswith(SYMBOL) and len(s) > len(SYMBOL) + 6 for s in syms):
+        if any(sym in mine for sym in syms):
             out.append(o)
     return out
 
@@ -444,10 +467,11 @@ def run():
     today = date.today()
     earnings = sorted(set(sum((rules.load_earnings(p) for p in EARNINGS_FILES if p.exists()), [])))
     price = last_price()
-    legs = option_positions()
-    pending = open_option_orders()
+    mine = own_symbols()
+    legs, foreign = option_positions(mine)
+    pending = open_option_orders(mine)
     log({"action": "check", "reason": f"price={price:.2f} legs={ {k: v['symbol'] for k, v in legs.items() if k != 'extra'} } "
-                                      f"open_orders={len(pending)}"})
+                                      f"open_orders={len(pending)} ignored_other_nvda_options={foreign}"})
 
     if pending:
         log({"action": "wait", "reason": f"{len(pending)} NVDA option order(s) still open -- not stacking another"})

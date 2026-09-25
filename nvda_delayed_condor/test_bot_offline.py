@@ -156,7 +156,10 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     # 3. pending order -> never stacks another
     f = Fake(bars, open_orders=[types.SimpleNamespace(symbol=None, legs=[types.SimpleNamespace(symbol="NVDA261009P00205000")])])
-    install(f, tmp); bot.run()
+    install(f, tmp)
+    bot.LOG_JSONL.write_text('{"action": "open_put_spread", "legs": "NVDA261009P00205000/NVDA261009P00185000", '
+                             '"expiration": "2026-08-28", "underlying_price": 217.3}\n')
+    bot.run()
     check("3 open order: waits, submits nothing", last_log()[-1]["action"] == "wait" and not f.submitted)
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -168,12 +171,14 @@ with tempfile.TemporaryDirectory() as tmp:
     bot.EARNINGS_FILES = saved_files
 
 pos = [("NVDA261009P00205000", -2), ("NVDA261009P00185000", 2)]
+OWN_PUTS = ('{"action": "open_put_spread", "legs": "NVDA261009P00205000/NVDA261009P00185000", '
+            '"expiration": "2026-10-09", "underlying_price": 217.3}\n')
 with tempfile.TemporaryDirectory() as tmp:
     # 5. put spread open, 20 DTE, near highs -> adds call spread on 50%
     saved = TODAY; TODAY = date(2026, 9, 18)
     f = Fake(weekly_until(TODAY), positions=pos, day=dict(high=223, low=215)); install(f, tmp)
     # the entry the bot logged on 2026-08-28 (NVDA 217.30); 222.27 now = risen > 2%
-    bot.LOG_JSONL.write_text('{"action": "open_put_spread", "expiration": "2026-10-09", "underlying_price": 217.3}\n')
+    bot.LOG_JSONL.write_text(OWN_PUTS)
     bot.run()
     ev = last_log()[-1]
     check("5 adds call spread", ev["action"] == "open_call_spread", ev.get("reason"))
@@ -183,7 +188,8 @@ with tempfile.TemporaryDirectory() as tmp:
         check("5 short call delta < 0.20", ev["short_delta"] < 0.20, str(ev["short_delta"]))
         check("5 same expiry as puts", bot.parse_occ(req.legs[0].symbol)["expiration"] == date(2026, 10, 9))
     # 5b. rerun (position now includes call legs? not yet) -> must not add twice
-    f2 = Fake(weekly_until(TODAY), positions=pos, day=dict(high=223, low=215)); install(f2, tmp)
+    f2 = Fake(weekly_until(TODAY), positions=pos + [("NVDA261009C00250000", -1),
+                                                    ("NVDA261009C00270000", 1)], day=dict(high=223, low=215)); install(f2, tmp)
     bot.run()
     check("5b never adds the call side twice", not f2.submitted, last_log()[-1]["action"])
     TODAY = saved
@@ -192,6 +198,7 @@ with tempfile.TemporaryDirectory() as tmp:
     # 6. price touches short put -> market close of the put spread
     saved = TODAY; TODAY = date(2026, 9, 18)
     f = Fake(weekly_until(TODAY), positions=pos, day=dict(high=215, low=204.5)); install(f, tmp)
+    bot.LOG_JSONL.write_text(OWN_PUTS)
     bot.run()
     ev = last_log()[-1]
     check("6 touch closes put spread", ev["action"] == "close_spread" and f.submitted, ev.get("reason"))
@@ -213,6 +220,22 @@ with tempfile.TemporaryDirectory() as tmp:
     bot.LOG_JSONL.write_text('{"action": "open_put_spread", "expiration": "2026-09-04", "underlying_price": 200}\n')
     bot.run()
     check("8 waits out the prior cycle before re-entering", last_log()[-1]["action"] == "wait" and not f.submitted)
+
+with tempfile.TemporaryDirectory() as tmp:
+    # 9. the bull-call-spread bot's legs on the same account are ignored, never closed
+    saved = TODAY; TODAY = date(2026, 9, 18)
+    other = [("NVDA261023C00240000", 1), ("NVDA261023C00250000", -1)]
+    f = Fake(weekly_until(TODAY), positions=other, day=dict(high=260, low=200)); install(f, tmp)
+    bot.run()
+    ev = [e for e in last_log() if e["action"] == "check"][-1]
+    check("9 other bot's NVDA calls ignored (not closed, not treated as ours)",
+          not f.submitted and "NVDA261023C00250000" in ev["reason"] and "legs={}" in ev["reason"], ev["reason"])
+    f = Fake(weekly_until(TODAY), positions=pos + other, day=dict(high=260, low=215)); install(f, tmp)
+    bot.LOG_JSONL.write_text(OWN_PUTS)
+    bot.run()
+    check("9b with both bots' legs present, only our own legs are managed",
+          all("NVDA261023" not in l.symbol for r in f.submitted for l in r.legs), [l.symbol for r in f.submitted for l in r.legs])
+    TODAY = saved
 
 print("\nALL PASS" if failures == 0 else f"\n{failures} FAILURE(S)")
 sys.exit(1 if failures else 0)
