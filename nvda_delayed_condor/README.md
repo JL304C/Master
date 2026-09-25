@@ -109,6 +109,12 @@ What the daily data confirms or changes:
 > worst drawdown −$1,710. By year: 2019 +$1,755, 2020 +$1,080, 2021 +$688, **2022 −$364**, 2023 +$1,451,
 > 2024 +$890, 2025 +$1,731, 2026 (to Sep) +$478.
 > With the bot's 2 contracts, double those numbers: about $3,200 of buying power held per trade and a −$3,420 worst drawdown.
+> **Reality check from the first dry run (2026-09-25):** the real Alpaca quote for the 205/185 Nov 6 put spread was a
+> **$2.00** credit (delta 0.19). The backtest's option model priced the same spread at $3.63, so it assumed option prices
+> ~80% richer than today's market. Re-pricing the backtest to match today's real quote (implied vol ≈ 0.78 × realized
+> instead of 1.10 ×) shrinks variant D to **+$1,060 to +$1,352 per contract over 8 years (~$22 a trade)**, with the same
+> ~$1,700 worst drawdown — roughly break-even. Whether today's cheap options are typical or unusual can only be settled
+> with real historical option prices (Databento OPRA). **Paper-trade only until that check is done.**
 > The settings described below (support signal, delayed call side) still work if you switch those two lines back to
 > `"support_signal"` and `True`.
 
