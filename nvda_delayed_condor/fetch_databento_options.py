@@ -29,7 +29,7 @@ Output: nvda_real_option_trades.csv (one row per trade) + a summary printed at t
 from __future__ import annotations
 
 import csv
-import hashlib
+import re
 import math
 import os
 import sys
@@ -120,54 +120,72 @@ def put_delta_from_price(S, K, T, price):
     return ncdf(d1) - 1
 
 
-def occ(expiry: date, strike: float) -> str:
-    """OPRA raw symbol, e.g. 'NVDA  261106P00205000' (root padded to 6 characters)."""
-    return f"{'NVDA':<6}{expiry:%y%m%d}P{int(round(strike * 1000)):08d}"
+OSI_TAIL = re.compile(r"(\d{6})([CP])(\d{8})$")
+
+
+def parse_option_symbol(sym: str):
+    """(expiry, right, strike) from an OSI-style symbol however it is spaced/padded,
+    e.g. 'NVDA  261106P00205000' -> (2026-11-06, 'P', 205.0). None if it doesn't parse."""
+    m = OSI_TAIL.search(str(sym).replace(" ", ""))
+    if not m:
+        return None
+    return datetime.strptime(m.group(1), "%y%m%d").date(), m.group(2), int(m.group(3)) / 1000.0
 
 
 def et_window(d: date):
     t1 = pd.Timestamp(datetime.combine(d, QUOTE_TIME), tz="America/New_York")
-    return (t1 - pd.Timedelta(minutes=10)).tz_convert("UTC"), (t1 + pd.Timedelta(minutes=1)).tz_convert("UTC")
+    return (t1 - pd.Timedelta(minutes=2)).tz_convert("UTC"), (t1 + pd.Timedelta(minutes=1)).tz_convert("UTC")
 
 
 # --------------------------------------------------------------------------- #
 class Quotes:
-    """Cached Databento quote downloads: {symbol: (bid, ask)} at ~3:45 PM ET on a day."""
+    """Real NVDA put quotes at ~3:45 PM ET on a given day: {(expiry, strike): (bid, ask)}.
+
+    Asks Databento for every NVDA option by its parent symbol (NVDA.OPT) for a 3-minute
+    window, so no contract names have to be guessed. One cached file per day."""
+
+    PARENT = "NVDA.OPT"
 
     def __init__(self, client):
         self.client = client
+        self.mem = {}
         CACHE.mkdir(exist_ok=True)
 
-    def _path(self, d, symbols):
-        key = hashlib.sha1((d.isoformat() + "|" + ",".join(sorted(symbols))).encode()).hexdigest()[:16]
-        return CACHE / f"{d.isoformat()}_{key}.dbn.zst"
+    def _path(self, d):
+        return CACHE / f"nvda_opts_{d.isoformat()}.dbn.zst"
 
-    def cost(self, d, symbols) -> float:
-        if self._path(d, symbols).exists():
+    def cost(self, d) -> float:
+        if self._path(d).exists():
             return 0.0
         s, e = et_window(d)
-        return self.client.metadata.get_cost(dataset=DATASET, symbols=symbols, schema=SCHEMA,
-                                             stype_in="raw_symbol", start=s, end=e)
+        return self.client.metadata.get_cost(dataset=DATASET, symbols=[self.PARENT], schema=SCHEMA,
+                                             stype_in="parent", start=s, end=e)
 
-    def get(self, d, symbols) -> dict:
-        path = self._path(d, symbols)
+    def get(self, d) -> dict:
+        if d in self.mem:
+            return self.mem[d]
+        path = self._path(d)
         if path.exists():
             store = db.DBNStore.from_file(path)
         else:
             s, e = et_window(d)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")      # strikes that were never listed just come back empty
-                store = self.client.timeseries.get_range(dataset=DATASET, symbols=symbols, schema=SCHEMA,
-                                                         stype_in="raw_symbol", start=s, end=e, path=path)
+            store = self.client.timeseries.get_range(dataset=DATASET, symbols=[self.PARENT], schema=SCHEMA,
+                                                     stype_in="parent", start=s, end=e, path=path)
         df = store.to_df()
         out = {}
         if len(df):
             df = df.sort_index()
             for sym, g in df.groupby("symbol"):
+                parsed = parse_option_symbol(sym)
+                if not parsed or parsed[1] != "P":
+                    continue
                 last = g.iloc[-1]
                 bid, ask = float(last["bid_px_00"]), float(last["ask_px_00"])
                 if bid > 0 and ask > 0 and ask >= bid:
-                    out[sym.strip() if isinstance(sym, str) else sym] = (bid, ask)
+                    out[(parsed[0], parsed[2])] = (bid, ask)
+        if not out:
+            print(f"  warning: no NVDA put quotes came back for {d}")
+        self.mem[d] = out
         return out
 
 
@@ -202,8 +220,7 @@ def entry_candidates(S_real, exp, width_real):
     ref = S_real * (1 - EVERY_CYCLE_OTM) * SUPPORT_BUFFER
     top = math.floor(ref / 5) * 5
     shorts = [top - 5 * k for k in range(0, int(0.20 * S_real / 5) + 1)]
-    strikes = sorted(set(shorts) | {k - width_real for k in shorts})
-    return ref, shorts, {k: occ(exp, k) for k in strikes if k > 0}
+    return ref, [k for k in shorts if k - width_real > 0]
 
 
 def simulate(D, earn, quotes: Quotes | None, first_day: date, estimate_only=False):
@@ -220,16 +237,17 @@ def simulate(D, earn, quotes: Quotes | None, first_day: date, estimate_only=Fals
         S = D[i]["c"] * f                                     # real price that day
         width = max(5.0, round(WIDTH_FRAC * S / 5) * 5)
         norm = WIDTH_TODAY / width                            # -> per $20-wide spread
-        ref, shorts, syms = entry_candidates(S, exp, width)
+        ref, shorts = entry_candidates(S, exp, width)
         if estimate_only:
-            est_cost += quotes.cost(D[i]["d"], list(syms.values()))
+            est_cost += quotes.cost(D[i]["d"])
+            trades.append(D[i]["d"])
             busy_until = ie
             continue
-        q = quotes.get(D[i]["d"], list(syms.values()))
+        q = quotes.get(D[i]["d"])
         T = dte / 365
         pick = None
         for K in shorts:                                      # highest first
-            qs, ql = q.get(syms.get(K)), q.get(syms.get(K - width))
+            qs, ql = q.get((exp, K)), q.get((exp, K - width))
             if not qs or not ql:
                 continue
             mid_s = (qs[0] + qs[1]) / 2
@@ -255,8 +273,8 @@ def simulate(D, earn, quotes: Quotes | None, first_day: date, estimate_only=Fals
         # (daily bars x f), so they compare directly with K even across a split.
         for j in range(i + 1, ie + 1):
             if j < ie and D[j]["l"] * f <= K:
-                qx = quotes.get(D[j]["d"], [syms[K], syms[K - width]])
-                a, b = qx.get(syms[K]), qx.get(syms[K - width])
+                qx = quotes.get(D[j]["d"])
+                a, b = qx.get((exp, K)), qx.get((exp, K - width))
                 if a and b:
                     cost = min(width, a[1] - b[0])
                     t["status"] = "touch_close"
@@ -310,9 +328,12 @@ def main():
     print(f"{DATASET} starts {rng['start'][:10]}; testing entries from {first} to {D[-1]['d']}")
 
     quotes = Quotes(client)
-    _, est = simulate(D, earn, quotes, first, estimate_only=True)
-    print(f"Estimated Databento cost: about ${est:,.2f} for the entry-day quotes, plus a few cents per "
-          f"touch-day download (cached files are free).")
+    entry_days, est = simulate(D, earn, quotes, first, estimate_only=True)
+    per_day = est / max(1, len(entry_days))
+    touch_days = len(entry_days) // 2              # rough: about half the spreads get closed early
+    print(f"Estimated Databento cost: ${est:,.2f} for {len(entry_days)} entry days (~${per_day:,.2f}/day)")
+    print(f"  plus ~${per_day * touch_days:,.2f} for the days a spread is closed early (~{touch_days} days)")
+    print(f"  = roughly ${est + per_day * touch_days:,.2f} in total. Already-downloaded days are free.")
     if input("Download? [y/N] ").strip().lower() != "y":
         print("Cancelled, nothing downloaded.")
         return
