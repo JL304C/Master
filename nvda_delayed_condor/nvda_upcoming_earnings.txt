@@ -1,0 +1,6 @@
+# UPCOMING NVDA earnings report dates -- YOU must keep this current.
+# The bot refuses to open a new spread unless this file lists a date AFTER the
+# expiration it would trade (otherwise it can't prove no earnings fall before expiry).
+# Check investor.nvidia.com (or Alpha Vantage EARNINGS_CALENDAR) each quarter.
+2026-11-18   # ESTIMATE (NVDA usually reports the 3rd/4th Wednesday of Nov) -- confirm when announced
+2027-02-24   # ESTIMATE -- confirm when announced

@@ -24,6 +24,8 @@ spread widths ($5 / $20) and per-contract costs mean the same thing they would t
 import csv, math, statistics, sys, os
 from datetime import date, timedelta
 
+import condor_rules as rules
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 TODAY_PRICE = 224.58          # NVDA close, week ending 2026-09-24
 START = date(2012, 1, 1)      # backtest window start (~14.7 years)
@@ -41,36 +43,14 @@ def load_weekly():
     rows.sort(key=lambda x: x['d'])
     return rows
 
-def load_earnings():
-    out = []
-    with open(os.path.join(HERE, 'nvda_earnings_dates.txt')) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith('#'):
-                out.append(date.fromisoformat(line))
-    return sorted(out)
-
 W = load_weekly()
-EARN = load_earnings()
+EARN = rules.load_earnings(os.path.join(HERE, 'nvda_earnings_dates.txt'))
 
 def earnings_between(d0, d1):
-    """Any earnings report strictly after d0 and on/before d1 (reports are post-market,
-    so a report ON the expiry date still lands before expiry settlement risk)."""
-    return any(d0 < e <= d1 for e in EARN)
+    return rules.earnings_between(EARN, d0, d1)
 
 # ---------------- indicators (weekly) ----------------
 closes = [w['c'] for w in W]
-def sma(i, n):
-    return sum(closes[i-n+1:i+1])/n if i >= n-1 else None
-def rsi(i, n=14):
-    if i < n: return None
-    g = l = 0.0
-    for k in range(i-n+1, i+1):
-        ch = closes[k]-closes[k-1]
-        if ch > 0: g += ch
-        else: l -= ch
-    if l == 0: return 100.0
-    return 100 - 100/(1+g/l)
 def realized_vol(i, n=26):
     if i < n: return None
     r = [math.log(closes[k]/closes[k-1]) for k in range(i-n+1, i+1)]
@@ -108,43 +88,12 @@ def leg_slip(px): return max(0.03, 0.02*px)
 def strike_round(x, inc, down=True):
     return (math.floor(x/inc) if down else math.ceil(x/inc))*inc
 
-# ---------------- signals ----------------
+# ---------------- signals (shared with the bot: condor_rules.py) ----------------
 def entry_signal(i, cfg):
-    """DECLINING but FINDING SUPPORT, all on weekly bars:
-       declining : the last 2 weeks' low is >= cfg.pullback below the 5-week closing high
-       support   : nearest of 10w SMA (~50d), 20w SMA (~100d), 40w SMA (~200d),
-                   or prior swing low (lowest low of weeks i-12..i-3, ~60d excl. last 2w)
-                   that sits at/below the close; close must be within cfg.near of it
-       holding   : the last 2 weeks' low tested support (within +/-3%) and held, AND
-                   the week closed up OR closed in the upper half of its range
-    """
-    if i < 45: return None
-    c = closes[i]; w = W[i]
-    hi = max(closes[i-5:i+1])             # 5-week (~25 trading day) closing high
-    lo2 = min(W[i]['l'], W[i-1]['l'])     # lowest trade of the last 2 weeks
-    if lo2 > hi*(1-cfg['pullback']): return None
-    levels = [sma(i,10), sma(i,20), sma(i,40), min(x['l'] for x in W[i-12:i-2])]
-    below = [lv for lv in levels if lv and lv <= c]
-    if not below: return None
-    sup = max(below)                      # nearest support underneath the close
-    if (c-sup)/sup > cfg['near']: return None
-    # tested and held: the last 2 weeks' low came within 3% of support but did not break
-    # it by more than 3% (price was rejected there) ...
-    if not (sup*0.97 <= lo2 <= sup*1.03): return None
-    # ... and the selling is stalling: closed up on the week, or in the upper half of
-    # the week's range (a weekly "hammer")
-    rng = w['h']-w['l']
-    stalling = c >= closes[i-1] or (rng > 0 and (c-w['l'])/rng >= 0.5)
-    if not stalling: return None
-    return sup
+    return rules.entry_signal(W, i, pullback=cfg['pullback'], near=cfg['near'])
 
 def call_add_signal(i, i0):
-    """Risen / near resistance / overbought."""
-    c = closes[i]
-    risen = c > closes[i0]*1.02
-    near_res = c >= 0.97*max(x['h'] for x in W[max(0,i-10):i+1])
-    ob = (rsi(i) or 0) >= 65
-    return risen or near_res or ob
+    return rules.call_add_signal(W, i, closes[i0])
 
 # ---------------- simulation ----------------
 def run(cfg):
