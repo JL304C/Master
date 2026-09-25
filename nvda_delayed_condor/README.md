@@ -145,6 +145,11 @@ logic lives in `condor_rules.py`, which both the bot and the backtest import, so
    The order is a two-leg limit order at the mid-price credit.
    After a spread is closed early, the bot waits for its original expiration before looking for a new entry, as the backtest did.
 
+**Getting fills:** entry orders ask **$0.05 less than the mid credit** (`ENTRY_CONCESSION`). The mid credit must still be at least 10%
+of the width. If an entry order doesn't fill, the bot tries again **each trading day for up to 7 days** (`RETRY_DAYS`),
+at that day's prices, instead of waiting a week. An order that filled, even partly, counts as a position.
+When the bot can't check an order's status, it assumes the order filled, so it waits rather than risk a second position.
+
 **Earnings safety:** you must keep `nvda_upcoming_earnings.txt` up to date. The bot refuses to open a position unless that
 file lists an earnings date *after* the expiry it would trade. The two dates in it now are **estimates**; replace them once NVIDIA
 announces the real ones.

@@ -6,12 +6,13 @@ CURRENT SETTINGS (ENTRY_MODE="every_cycle", ADD_CALL_SIDE=False) = backtest vari
 chosen for the most trades: a $20-wide put credit spread every cycle, no call side.
 
   1. On the last trading day of the week, with no spread open (and the previous
-     position's cycle finished): sell a $20-wide put credit spread, ~45 DTE (shortened
+     position's cycle finished) -- or on the next trading days if that entry order did not
+     fill: sell a $20-wide put credit spread, ~45 DTE (shortened
      to the last weekly expiry before earnings, min 28 DTE), short put <= 0.30 delta and
        - every_cycle mode:    at or below (price x 0.95) x 0.98, i.e. ~7% out of the money
        - support_signal mode: only if NVDA is "declining but finding support"
                               (condor_rules.py), short put 2% below that support.
-     Only if the credit is >= 10% of the width.
+     Only if the mid credit is >= 10% of the width; the limit asks $0.05 below the mid.
   2. Only if ADD_CALL_SIDE is True -- with 14-28 days left, if NVDA has risen / is near resistance / is overbought and
      no earnings fall before expiry: add a same-expiry $20-wide call credit spread,
      short call < 0.20 delta, on CALL_FRACTION of the put contracts (default 50%).
@@ -87,7 +88,9 @@ MIN_DTE = 28                  # shortest expiry allowed when dodging earnings
 SUPPORT_BUFFER = 0.98         # short put at or below support - 2%
 MAX_PUT_DELTA = 0.30
 MAX_CALL_DELTA = 0.20
-MIN_PUT_CREDIT_PCT = 0.10     # skip if put credit < 10% of width
+MIN_PUT_CREDIT_PCT = 0.10     # skip if the MID credit < 10% of width
+ENTRY_CONCESSION = 0.05       # ask this much less than the mid credit, so the order fills more often
+RETRY_DAYS = 7                # an entry order that didn't fill is retried each trading day for this long
 MIN_CALL_CREDIT = 0.05        # skip call add if credit is trivial
 CALL_ADD_DTE = (14, 28)       # "2-4 weeks left"
 EXPIRY_PIN_BUFFER = 1.00      # on expiry day, close a spread whose short strike is this close
@@ -195,6 +198,27 @@ def last_price() -> float:
     t = stock_client.get_stock_latest_trade(
         StockLatestTradeRequest(symbol_or_symbols=SYMBOL, feed=STOCK_FEED))[SYMBOL]
     return float(t.price)
+
+
+def entry_filled(event: dict) -> bool:
+    """Did the logged entry order fill (even partly)? If it can't be checked, assume it did
+    -- the safe side, since that only makes the bot wait instead of opening a second position."""
+    oid = event.get("order_id")
+    if not oid or oid == "DRY-RUN":
+        return True
+    try:
+        o = trade_client.get_order_by_id(oid)
+    except Exception:
+        return True
+    status = getattr(o.status, "value", o.status)
+    if float(o.filled_qty or 0) > 0:
+        return True
+    return status not in ("canceled", "expired", "rejected", "done_for_day")
+
+
+def is_trading_day(d: date) -> bool:
+    cal = trade_client.get_calendar(GetCalendarRequest(start=d, end=d))
+    return any(as_date(c.date) == d for c in cal)
 
 
 def is_last_trading_day_of_week(today: date) -> bool:
@@ -384,16 +408,17 @@ def try_open_put_spread(bars, price, earnings):
     if max_loss > ACCOUNT_CAP:
         log({"action": "skip_put", "reason": f"max loss ${max_loss:,.0f} over ${ACCOUNT_CAP:,.0f} cap"})
         return
+    limit = round(credit - ENTRY_CONCESSION, 2)
     oid = submit_spread(
                         [(short["symbol"], PositionIntent.SELL_TO_OPEN),
                          (long["symbol"], PositionIntent.BUY_TO_OPEN)],
-                        PUT_CONTRACTS, credit)
+                        PUT_CONTRACTS, limit)
     log({"action": "open_put_spread", "legs": f"{short['symbol']}/{long['symbol']}", "qty": PUT_CONTRACTS,
          "expiration": exp.isoformat(), "underlying_price": price, "support": round(sup, 2), "mode": ENTRY_MODE,
-         "limit_credit": credit, "short_delta": short["delta"], "buying_power": max_loss,
+         "mid_credit": credit, "limit_credit": limit, "short_delta": short["delta"], "buying_power": max_loss,
          "order_id": order_id_str(oid),
          "reason": f"{ENTRY_MODE} ref {sup:.2f}; short {short['strike']} (delta {short['delta']:.2f}); "
-                   f"credit {credit:.2f} x{PUT_CONTRACTS}; BP ${max_loss:,.0f}"})
+                   f"mid {credit:.2f}, limit {limit:.2f} x{PUT_CONTRACTS}; BP ${max_loss:,.0f}"})
 
 
 def try_add_call_spread(bars, price, legs, earnings):
@@ -504,16 +529,23 @@ def run():
             log({"action": "wait", "reason": "position open, nothing to do"})
         return
 
-    # flat. Like the backtest, one position per cycle: after a spread is closed early,
-    # wait for its original expiration before looking for a new entry.
-    live = [e["expiration"] for e in past_events("open_put_spread")
-            if date.fromisoformat(e["expiration"]) >= today]
-    if live:
-        log({"action": "wait", "reason": f"flat, but the last position's cycle runs to {max(live)}"})
+    # flat. Like the backtest, one position per cycle: after a spread that actually FILLED
+    # is closed early, wait for its original expiration before looking for a new entry.
+    # Entry orders that never filled don't count as a cycle.
+    attempts = [e for e in past_events("open_put_spread") if date.fromisoformat(e["expiration"]) >= today]
+    filled = [e for e in attempts if entry_filled(e)]
+    if filled:
+        log({"action": "wait", "reason": f"flat, but the last position's cycle runs to {max(e['expiration'] for e in filled)}"})
         return
-    # new entries only on the week's last trading day (the backtest used weekly closes)
-    if not is_last_trading_day_of_week(today) and "--force-signal-check" not in sys.argv:
-        log({"action": "wait", "reason": "flat; entry signal is only checked on the last trading day of the week"})
+    # New entries on the week's last trading day (the backtest used weekly closes) -- or on
+    # any trading day within RETRY_DAYS of an entry order that didn't fill.
+    recent_miss = [e for e in attempts
+                   if (datetime.now(timezone.utc) - datetime.fromisoformat(e["ts"])).days < RETRY_DAYS]
+    if recent_miss and is_trading_day(today):
+        log({"action": "retry_entry", "reason": f"entry order {recent_miss[-1].get('order_id')} from "
+                                                f"{recent_miss[-1]['ts'][:10]} did not fill -- trying again today"})
+    elif not is_last_trading_day_of_week(today) and "--force-signal-check" not in sys.argv:
+        log({"action": "wait", "reason": "flat; new entries are only opened on the last trading day of the week"})
         return
     try_open_put_spread(weekly_bars(), price, earnings)
 

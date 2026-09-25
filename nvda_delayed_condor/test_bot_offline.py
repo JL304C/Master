@@ -87,6 +87,12 @@ class Fake:
     def get_orders(self, req):
         return self.open_orders
 
+    order_status = {}
+
+    def get_order_by_id(self, oid):
+        st, q = self.order_status[oid]
+        return types.SimpleNamespace(status=st, filled_qty=q)
+
     def submit_order(self, req):
         self.submitted.append(req)
         return types.SimpleNamespace(id=f"order-{len(self.submitted)}")
@@ -261,6 +267,38 @@ with tempfile.TemporaryDirectory() as tmp:
     bot.LOG_JSONL.write_text(OWN_PUTS)
     bot.run()
     check("11 default mode: no call side added", not f.submitted and last_log()[-1]["action"] == "wait")
+    TODAY = saved
+
+def attempt(days_ago, oid):
+    ts = (datetime.now(timezone.utc) - timedelta(days=days_ago)).isoformat()
+    return ('{"ts": "%s", "action": "open_put_spread", "legs": "NVDA261106P00205000/NVDA261106P00185000", '
+            '"expiration": "2026-11-06", "underlying_price": 224.21, "order_id": "%s"}\n' % (ts, oid))
+
+with tempfile.TemporaryDirectory() as tmp:
+    # 12. Monday after an UNFILLED Friday entry order -> retries today, limit = mid - 0.05
+    saved = TODAY; TODAY = date(2026, 9, 28)
+    f = Fake(weekly_until(TODAY)); f.order_status = {"o1": ("expired", "0")}; install(f, tmp)
+    bot.LOG_JSONL.write_text(attempt(3, "o1"))
+    bot.run()
+    acts = [e["action"] for e in last_log()]
+    ev = last_log()[-1]
+    check("12 unfilled Friday order is retried on Monday", "retry_entry" in acts and ev["action"] == "open_put_spread"
+          and len(f.submitted) == 1, str(acts[-3:]))
+    if f.submitted:
+        check("12 limit asks $0.05 less than the mid credit",
+              abs(-f.submitted[0].limit_price - (ev["mid_credit"] - 0.05)) < 1e-9,
+              f"mid {ev['mid_credit']} limit {f.submitted[0].limit_price}")
+    # 12b. same, but that order DID fill (position since closed) -> waits out the cycle
+    f = Fake(weekly_until(TODAY)); f.order_status = {"o1": ("filled", "2")}; install(f, tmp)
+    bot.LOG_JSONL.write_text(attempt(3, "o1"))
+    bot.run()
+    check("12b filled entry -> waits for its expiry, no retry", not f.submitted and last_log()[-1]["action"] == "wait")
+    # 12c. unfilled order more than a week old, mid-week -> normal weekly schedule (no retry)
+    TODAY = date(2026, 9, 30)
+    f = Fake(weekly_until(TODAY)); f.order_status = {"o1": ("expired", "0")}; install(f, tmp)
+    bot.LOG_JSONL.write_text(attempt(8, "o1"))
+    bot.run()
+    check("12c old miss, mid-week -> waits for Friday", not f.submitted and last_log()[-1]["action"] == "wait")
     TODAY = saved
 
 print("\nALL PASS" if failures == 0 else f"\n{failures} FAILURE(S)")
