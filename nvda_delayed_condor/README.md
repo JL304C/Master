@@ -115,15 +115,15 @@ What the daily data confirms or changes:
 > instead of 1.10 ×) shrinks variant D to **+$1,060 to +$1,352 per contract over 8 years (~$22 a trade)**, with the same
 > ~$1,700 worst drawdown — roughly break-even. Whether today's cheap options are typical or unusual can only be settled
 > with real historical option prices (Databento OPRA). **Paper-trade only until that check is done.**
-> **Real option prices (Databento OPRA, run 2026-09-25, `fetch_databento_options.py`):** this is the bot's current strategy
-> replayed with real 3:45 PM bid/ask quotes. Databento returned quotes from Aug 2021 onward; earlier dates came back empty.
-> Per $20-wide spread, 1 contract, Aug 2021 – Aug 2026:
-> **39 trades, 59% won, +$1,820 total (about +$364 a year, +$47 a trade)**, average win +$310, average loss −$332,
-> worst trade −$793, worst drawdown −$2,245. By year: 2021 +$131, **2022 −$475**, 2023 +$1,722, **2024 −$543**,
-> 2025 +$828, 2026 (part) +$157. The average real credit was $3.55; today's $2.00 is at the low end.
-> This lands between the original model (+$4,479 over the same window) and the model re-priced to today's quote (+$601).
-> Positive, but not statistically reliable (t ≈ 0.8): wins and losses are about the same size, and it lost money in 2 of 5 years.
-> Observation (too few trades to act on): trades with smaller credits (calmer markets) did best, and the highest-credit trades lost.
+> **Real option prices (Databento OPRA, `fetch_databento_options.py`, full run 2026-09-25):** this is the bot's current strategy
+> replayed with real 3:45 PM bid/ask quotes, using 12:45 PM quotes on early-close days.
+> Per $20-wide spread, 1 contract, May 2018 – Aug 2026:
+> **62 trades, 58% won, +$2,461 total (about +$297 a year, +$40 a trade)**, average win +$320, average loss −$348,
+> worst trade −$793, worst drawdown −$2,245. By year: 2018 −$119, 2019 +$641, 2020 +$597, 2021 −$311, 2022 −$475,
+> 2023 +$1,683, 2024 −$538, 2025 +$828, 2026 (part) +$157, so **4 of 9 years lost money**.
+> Four entries were skipped for low credit and seven for missing quotes. The average credit was $3.48; today's $2.00 is at the low end.
+> Positive, but not statistically reliable (t ≈ 0.9): wins and losses are about the same size.
+> Far below the original model's estimate (+$7,346 over a similar window).
 > The settings described below (support signal, delayed call side) still work if you switch those two lines back to
 > `"support_signal"` and `True`.
 
