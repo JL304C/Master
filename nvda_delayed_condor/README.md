@@ -169,7 +169,6 @@ announces the real ones.
 - `python test_bot_offline.py` runs every decision path against simulated Alpaca responses built from real NVDA weekly bars:
   entry, mid-week wait, pending-order wait, stale earnings file, call add, no double add, touch-close, dry run, and the one-cycle wait.
   It also checks that alpaca-py accepts every multi-leg order. All tests pass.
-- **Not yet run against the real Alpaca API.** One behaviour needs checking on the first real paper fill: the bot sends a two-leg credit as a
-  **negative** limit price. That matches my understanding of Alpaca's convention, but I couldn't confirm it from the docs from here. If the
-  convention were the reverse, Alpaca should reject the order rather than fill it at a bad price. Check that the first order fills as a credit.
+- **First real paper order, 2026-09-25:** Alpaca accepted the two-leg order as "Limit @ -$2.03" for 2 × 205/185
+  Nov 6 puts: sell 205, buy 185. That confirms the negative-limit-price-means-credit convention. The fill itself is still to be confirmed.
 - The bot uses Alpaca's free IEX price feed; its weekly highs and lows can differ slightly from the full-market (SIP) data.
