@@ -5,3 +5,4 @@ gpc_wheel_bot/gpc_wheel_log.jsonl
 gpc_wheel_bot/gpc_wheel_trades.csv
 nvda_delayed_condor/nvda_condor_log.jsonl
 nvda_delayed_condor/nvda_condor_trades.csv
+nvda_delayed_condor/nvda_daily_databento.csv

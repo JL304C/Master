@@ -61,6 +61,41 @@ Findings:
 6. Holding through earnings looks better here, but the weekly model understates gap-through-strike losses. It is not
    recommended on this evidence.
 
+## Daily-bar rerun (Databento, Nov 2018 – Sep 2026, 7.9 years)
+
+`nvda_daily_backtest.py` reruns the strategy on real **daily** NVDA bars (Databento XNAS.ITCH, from
+`fetch_databento_daily.py`), simulating what the bot actually does day by day:
+
+- the entry signal is checked on the last trading day of each week, using the same `condor_rules` code as the bot;
+- strike touches are checked every day;
+- the call spread can be added on any day with 14–28 days left.
+
+Options are still Black-Scholes priced, with the same costs as before.
+Run: `python3 nvda_daily_backtest.py` (needs `nvda_daily_databento.csv` next to it).
+
+| Variant | $20 wide: trades / win / total / avg / worst / max DD / return per trade on BP / t | $5 wide total |
+|---|---|---|
+| A. Put spread only (signal) | 11 / 64% / +$1,818 / +$165 / −$365 / −$433 / 10.3% / 1.6 | +$177 |
+| **B. Delayed iron condor** | **11 / 64% / +$1,946 / +$177 / −$365 / −$809 / 11.1% / 1.5** | +$79 |
+| C. Calls on 50% (2 put / 1 call) | 11 / 73% / +$3,764 / +$342 / −$731 / −$996 / 10.7% / 1.6 | +$256 |
+| D. No signal, put spread each cycle | 62 / 61% / +$7,346 / +$118 / −$382 / −$1,710 / 7.4% / 2.7 | −$273 |
+| E. No signal + delayed calls | 62 / 52% / +$9,002 / +$145 / −$382 / −$1,771 / 9.1% / 2.7 | −$476 |
+| F. Delayed IC through earnings | 14 / 57% / +$1,885 / +$135 / −$358 / −$957 / 8.4% / 1.2 | −$105 |
+
+Over the same period, the weekly-bar backtest gave B +$1,218 across 12 trades, so daily bars look somewhat better.
+
+What the daily data confirms or changes:
+- **$20 wide works; $5 wide does not.** At $5 wide the credit barely exceeds the bid/ask spread and fees.
+- **The signal picks better trades but rarely fires.** It earned 10–11% per trade versus 7.4% with no signal, but fired
+  only 11 times in about 8 years. Trading every cycle made more money in total (+$7,346) because the capital is in use far more often.
+- **The call add is a small, noisy positive in this period.** It added +$128 over 7 adds with the signal and +$1,659 over 44
+  without it. Over the full 2012–2026 weekly test it was negative without the signal. Treat it as optional, not an edge.
+- **Holding through earnings is worse, so keep avoiding it.**
+- **Still not statistically proven.** t ≈ 1.5–1.6 for the signal strategies.
+- **Data caveat:** Databento's daily bars include pre-market and after-hours trading, which can only make the backtest
+  close spreads early more often than the bot would. Three days are flagged "degraded" by Databento.
+- The CSV is **not committed**: Databento's licence restricts redistribution, so it stays on your laptop.
+
 **Current state (week of 2026-09-24):** there is no new signal. A signal on 2026-08-28 would still be open, with an Oct 9 expiry.
 
 ---
