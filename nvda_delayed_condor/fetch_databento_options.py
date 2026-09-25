@@ -133,8 +133,11 @@ def parse_option_symbol(sym: str):
     return datetime.strptime(m.group(1), "%y%m%d").date(), m.group(2), int(m.group(3)) / 1000.0
 
 
-def et_window(d: date):
-    t1 = pd.Timestamp(datetime.combine(d, QUOTE_TIME), tz="America/New_York")
+HALF_DAY_QUOTE_TIME = time(12, 45)          # 1 PM-close days (day after Thanksgiving, Christmas Eve, ...)
+
+
+def et_window(d: date, at: time = QUOTE_TIME):
+    t1 = pd.Timestamp(datetime.combine(d, at), tz="America/New_York")
     return (t1 - pd.Timedelta(minutes=2)).tz_convert("UTC"), (t1 + pd.Timedelta(minutes=1)).tz_convert("UTC")
 
 
@@ -152,8 +155,9 @@ class Quotes:
         self.mem = {}
         CACHE.mkdir(exist_ok=True)
 
-    def _path(self, d):
-        return CACHE / f"nvda_opts_{d.isoformat()}.dbn.zst"
+    def _path(self, d, at=QUOTE_TIME):
+        suffix = "" if at == QUOTE_TIME else f"_{at:%H%M}"
+        return CACHE / f"nvda_opts_{d.isoformat()}{suffix}.dbn.zst"
 
     def cost(self, d) -> float:
         if self._path(d).exists():
@@ -165,13 +169,26 @@ class Quotes:
     def get(self, d) -> dict:
         if d in self.mem:
             return self.mem[d]
-        path = self._path(d)
+        out = self._fetch(d, QUOTE_TIME)
+        if not out:                                   # half-day session: market closed at 1 PM
+            out = self._fetch(d, HALF_DAY_QUOTE_TIME)
+            if out:
+                print(f"  {d}: early-close day, used 12:45 PM prices")
+        if not out:
+            print(f"  warning: no NVDA put quotes came back for {d}")
+        self.mem[d] = out
+        return out
+
+    def _fetch(self, d, at) -> dict:
+        path = self._path(d, at)
         if path.exists():
             store = db.DBNStore.from_file(path)
         else:
-            s, e = et_window(d)
-            store = self.client.timeseries.get_range(dataset=DATASET, symbols=[self.PARENT], schema=SCHEMA,
-                                                     stype_in="parent", start=s, end=e, path=path)
+            s, e = et_window(d, at)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")          # "no data" / "degraded day" notices
+                store = self.client.timeseries.get_range(dataset=DATASET, symbols=[self.PARENT], schema=SCHEMA,
+                                                         stype_in="parent", start=s, end=e, path=path)
         df = store.to_df()
         out = {}
         if len(df):
@@ -184,9 +201,6 @@ class Quotes:
                 bid, ask = float(last["bid_px_00"]), float(last["ask_px_00"])
                 if bid > 0 and ask > 0 and ask >= bid:
                     out[(parsed[0], parsed[2])] = (bid, ask)
-        if not out:
-            print(f"  warning: no NVDA put quotes came back for {d}")
-        self.mem[d] = out
         return out
 
 
@@ -290,6 +304,7 @@ def simulate(D, earn, quotes: Quotes | None, first_day: date, estimate_only=Fals
             t["close_cost"] = min(width, max(0.0, K - S_exp))
         fees = FEE_PER_CONTRACT * (4 if t["status"].startswith("touch") else 2)
         t["pnl_per_20wide"] = round(((fill - t["close_cost"]) * 100 - fees) * norm, 2)
+        print(f"  {t['entry']} -> {t['exp']}  {t['status']:<20} P&L per $20-wide ${t['pnl_per_20wide']:>8,.2f}")
         t["credit_per_20wide"] = round(fill * norm, 2)
         trades.append(t)
         busy_until = ie
@@ -339,6 +354,7 @@ def main():
         print("Cancelled, nothing downloaded.")
         return
 
+    print("Downloading and replaying trades -- this can take several minutes; a line prints per trade.")
     trades, _ = simulate(D, earn, quotes, first)
     cols = ["entry", "exp", "status", "dte", "price", "width", "short", "long", "short_delta",
             "bid_ask_short", "bid_ask_long", "mid_credit", "fill_credit", "credit_per_20wide",
