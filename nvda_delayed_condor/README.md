@@ -102,6 +102,17 @@ What the daily data confirms or changes:
 
 # Paper-trading bot (`nvda_condor_bot.py`)
 
+> **Current setting: `ENTRY_MODE = "every_cycle"`, `ADD_CALL_SIDE = False`** (chosen for the most trades).
+> That is daily-backtest variant D: a $20-wide put credit spread every cycle, with the short put about 7% below the price
+> (reference = price × 0.95, then −2%, delta ≤ 0.30) and no call side.
+> Result per contract, Nov 2018 – Sep 2026: 62 trades (~8 a year), 61% won, +$7,346 total, worst trade −$382,
+> worst drawdown −$1,710. By year: 2019 +$1,755, 2020 +$1,080, 2021 +$688, **2022 −$364**, 2023 +$1,451,
+> 2024 +$890, 2025 +$1,731, 2026 (to Sep) +$478.
+> With the bot's 2 contracts, double those numbers: about $3,200 of buying power held per trade and a −$3,420 worst drawdown.
+> The settings described below (support signal, delayed call side) still work if you switch those two lines back to
+> `"support_signal"` and `True`.
+
+
 The bot trades the backtested rules on your **Alpaca paper** account (`paper=True` is hard-coded). The signal
 logic lives in `condor_rules.py`, which both the bot and the backtest import, so they trade exactly the same rules.
 

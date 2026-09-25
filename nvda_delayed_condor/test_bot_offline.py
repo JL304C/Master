@@ -128,6 +128,9 @@ def check(name, cond, detail=""):
 
 failures = 0
 bars = weekly_until(TODAY)
+# tests 1-9 exercise the support-signal + delayed-call-side mode; 10-11 the default mode
+DEFAULT_MODE = (bot.ENTRY_MODE, bot.ADD_CALL_SIDE)
+bot.ENTRY_MODE, bot.ADD_CALL_SIDE = "support_signal", True
 
 with tempfile.TemporaryDirectory() as tmp:
     # 1. flat, signal week -> opens a put spread
@@ -235,6 +238,29 @@ with tempfile.TemporaryDirectory() as tmp:
     bot.run()
     check("9b with both bots' legs present, only our own legs are managed",
           all("NVDA261023" not in l.symbol for r in f.submitted for l in r.legs), [l.symbol for r in f.submitted for l in r.legs])
+    TODAY = saved
+
+bot.ENTRY_MODE, bot.ADD_CALL_SIDE = DEFAULT_MODE
+check("10 default settings: every_cycle, no call side", DEFAULT_MODE == ("every_cycle", False), str(DEFAULT_MODE))
+with tempfile.TemporaryDirectory() as tmp:
+    # 10b. every_cycle opens on a week-end with NO support signal (2026-09-11)
+    saved = TODAY; TODAY = date(2026, 9, 11)
+    wb = weekly_until(TODAY)
+    check("10b (precondition) no support signal that week", bot.rules.entry_signal(wb, len(wb) - 1) is None)
+    f = Fake(wb); install(f, tmp); bot.run()
+    ev = last_log()[-1]
+    check("10b every_cycle opens a put spread anyway", ev["action"] == "open_put_spread" and len(f.submitted) == 1, ev.get("reason"))
+    if f.submitted:
+        K = bot.parse_occ(f.submitted[0].legs[0].symbol)["strike"]
+        check("10b short put ~7% OTM or lower", K <= wb[-1]["c"] * 0.95 * 0.98, f"{K} vs price {wb[-1]['c']:.2f}")
+    TODAY = saved
+with tempfile.TemporaryDirectory() as tmp:
+    # 11. put spread open with 20 DTE and NVDA risen: default mode never adds calls
+    saved = TODAY; TODAY = date(2026, 9, 18)
+    f = Fake(weekly_until(TODAY), positions=pos, day=dict(high=223, low=215)); install(f, tmp)
+    bot.LOG_JSONL.write_text(OWN_PUTS)
+    bot.run()
+    check("11 default mode: no call side added", not f.submitted and last_log()[-1]["action"] == "wait")
     TODAY = saved
 
 print("\nALL PASS" if failures == 0 else f"\n{failures} FAILURE(S)")

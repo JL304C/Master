@@ -1,14 +1,18 @@
 """
-NVDA delayed iron condor -- scheduled paper-trading bot for Alpaca.
+NVDA put credit spread / delayed iron condor -- scheduled paper-trading bot for Alpaca.
 
-Trades the strategy backtested in nvda_delayed_condor_backtest.py, using the SAME
-signal rules (condor_rules.py):
+Trades the strategies backtested in nvda_daily_backtest.py / nvda_delayed_condor_backtest.py.
+CURRENT SETTINGS (ENTRY_MODE="every_cycle", ADD_CALL_SIDE=False) = backtest variant D,
+chosen for the most trades: a $20-wide put credit spread every cycle, no call side.
 
-  1. On the last trading day of the week, if NVDA is "declining but finding support"
-     and no spread is open: sell a $20-wide put credit spread, ~45 DTE (shortened to
-     the last weekly expiry before earnings, min 28 DTE), short put 2% below support
-     and <= 0.30 delta. Only if the credit is >= 10% of the width.
-  2. With 14-28 days left, if NVDA has risen / is near resistance / is overbought and
+  1. On the last trading day of the week, with no spread open (and the previous
+     position's cycle finished): sell a $20-wide put credit spread, ~45 DTE (shortened
+     to the last weekly expiry before earnings, min 28 DTE), short put <= 0.30 delta and
+       - every_cycle mode:    at or below (price x 0.95) x 0.98, i.e. ~7% out of the money
+       - support_signal mode: only if NVDA is "declining but finding support"
+                              (condor_rules.py), short put 2% below that support.
+     Only if the credit is >= 10% of the width.
+  2. Only if ADD_CALL_SIDE is True -- with 14-28 days left, if NVDA has risen / is near resistance / is overbought and
      no earnings fall before expiry: add a same-expiry $20-wide call credit spread,
      short call < 0.20 delta, on CALL_FRACTION of the put contracts (default 50%).
      Added at most once per position.
@@ -73,7 +77,10 @@ import condor_rules as rules
 SYMBOL = "NVDA"
 WIDTH = 20.0                  # spread width, both sides ($5 wide lost money after costs)
 PUT_CONTRACTS = 2             # put spreads per position (backtest: <=5 for a $26k account)
-CALL_FRACTION = 0.5           # call spreads = 50% of put contracts (backtest variant C)
+ENTRY_MODE = "every_cycle"    # "every_cycle" (most trades, backtest D) or "support_signal"
+EVERY_CYCLE_OTM = 0.05        # every_cycle: reference level = price x (1 - this)
+ADD_CALL_SIDE = False         # True = delayed iron condor (add the call spread later)
+CALL_FRACTION = 0.5           # call spreads = 50% of put contracts (if ADD_CALL_SIDE)
 ACCOUNT_CAP = 26_000.0        # max loss of a new position must fit under this
 TARGET_DTE = 45
 MIN_DTE = 28                  # shortest expiry allowed when dodging earnings
@@ -342,12 +349,15 @@ def pick_expiry(earnings: list[date]) -> date | None:
 
 def try_open_put_spread(bars, price, earnings):
     i = len(bars) - 1
-    sup = rules.entry_signal(bars, i)
-    if sup is None:
-        log({"action": "no_signal", "reason": f"price={price:.2f}: not declining-into-support this week"})
-        return
+    if ENTRY_MODE == "every_cycle":
+        sup = price * (1 - EVERY_CYCLE_OTM)
+    else:
+        sup = rules.entry_signal(bars, i)
+        if sup is None:
+            log({"action": "no_signal", "reason": f"price={price:.2f}: not declining-into-support this week"})
+            return
     if not any(e > date.today() + timedelta(days=TARGET_DTE) for e in earnings):
-        log({"action": "alert", "reason": "signal fired but nvda_upcoming_earnings.txt has no date "
+        log({"action": "alert", "reason": "ready to open but nvda_upcoming_earnings.txt has no date "
              "beyond the trade window -- update it, then rerun"})
         return
     exp = pick_expiry(earnings)
@@ -379,10 +389,10 @@ def try_open_put_spread(bars, price, earnings):
                          (long["symbol"], PositionIntent.BUY_TO_OPEN)],
                         PUT_CONTRACTS, credit)
     log({"action": "open_put_spread", "legs": f"{short['symbol']}/{long['symbol']}", "qty": PUT_CONTRACTS,
-         "expiration": exp.isoformat(), "underlying_price": price, "support": round(sup, 2),
+         "expiration": exp.isoformat(), "underlying_price": price, "support": round(sup, 2), "mode": ENTRY_MODE,
          "limit_credit": credit, "short_delta": short["delta"], "buying_power": max_loss,
          "order_id": order_id_str(oid),
-         "reason": f"support {sup:.2f}; short {short['strike']} (delta {short['delta']:.2f}); "
+         "reason": f"{ENTRY_MODE} ref {sup:.2f}; short {short['strike']} (delta {short['delta']:.2f}); "
                    f"credit {credit:.2f} x{PUT_CONTRACTS}; BP ${max_loss:,.0f}"})
 
 
@@ -488,7 +498,7 @@ def run():
             return
         if manage(legs, price, today_bar()):
             return
-        if "short_put" in legs and "short_call" not in legs:
+        if ADD_CALL_SIDE and "short_put" in legs and "short_call" not in legs:
             try_add_call_spread(weekly_bars(), price, legs, earnings)
         else:
             log({"action": "wait", "reason": "position open, nothing to do"})
