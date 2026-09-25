@@ -2,7 +2,8 @@
 Real-option-price check of the bot's current strategy (put credit spread every cycle,
 no call side) using Databento OPRA quotes -- run on your laptop.
 
-For each cycle the bot would have traded since OPRA.PILLAR data begins (Mar 2023):
+For each cycle the bot would have traded (from the start of nvda_daily_databento.csv, May
+2018 -- OPRA.PILLAR itself goes back to 2013):
   1. On the entry day (last trading day of the week, flat) it downloads the real 3:45 PM ET
      bid/ask quotes for the candidate NVDA puts at the ~45-DTE expiry (earnings avoided),
      and picks strikes exactly like the bot: short put = highest strike at or below
@@ -14,8 +15,8 @@ For each cycle the bot would have traded since OPRA.PILLAR data begins (Mar 2023
      short put's ask, receive the long put's bid.
   3. Otherwise the spread settles at expiry from NVDA's close.
 
-Width: $20 today (NVDA ~$225) is ~9% of the price. Earlier trades use the same ~9% (so
-~$40 wide before the June 2024 10:1 split) and every P&L is converted to "per $20-wide
+Width: $20 today (NVDA ~$225) is ~9% of the price. Earlier trades use the same ~9% of the
+as-traded price (NVDA split 4:1 in July 2021 and 10:1 in June 2024) and every P&L is converted to "per $20-wide
 spread" so all trades are comparable with today's bot.
 
 Needs: DATABENTO_API_KEY in .env, nvda_daily_databento.csv (from fetch_databento_daily.py),
@@ -60,7 +61,7 @@ ENTRY_CONCESSION_TODAY = 0.05               # $ under mid, scaled with the width
 FEE_PER_CONTRACT = 0.03
 R = 0.04
 QUOTE_TIME = time(15, 45)                   # the bot runs at 3:45 PM ET
-SPLITS = [(date(2024, 6, 10), 10)]          # (effective date, ratio) after OPRA.PILLAR starts
+SPLITS = [(date(2021, 7, 20), 4), (date(2024, 6, 10), 10)]   # NVDA splits within the daily data
 
 
 # --------------------------------------------------------------------------- #
@@ -324,7 +325,7 @@ def main():
     D = load_daily()
     earn = rules.load_earnings(HERE / "nvda_earnings_dates.txt")
     rng = client.metadata.get_dataset_range(dataset=DATASET)
-    first = date.fromisoformat(rng["start"][:10]) + timedelta(days=1)
+    first = max(date.fromisoformat(rng["start"][:10]) + timedelta(days=1), D[0]["d"])
     print(f"{DATASET} starts {rng['start'][:10]}; testing entries from {first} to {D[-1]['d']}")
 
     quotes = Quotes(client)
