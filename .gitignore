@@ -3,3 +3,9 @@
 __pycache__/
 gpc_wheel_bot/gpc_wheel_log.jsonl
 gpc_wheel_bot/gpc_wheel_trades.csv
+bollinger_put_spread/bb_state.json
+bollinger_put_spread/bb_state.tmp
+bollinger_put_spread/bb_log.jsonl
+bollinger_put_spread/bb_signals.csv
+bollinger_put_spread/bb_trades.csv
+bollinger_put_spread/bb_earnings_cache.json
