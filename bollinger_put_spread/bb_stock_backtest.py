@@ -43,7 +43,6 @@ import bb_rules as rules
 
 HERE = Path(__file__).resolve().parent
 MIN_CREDIT = 0.50
-DTE_MIN, DTE_MAX = 45, 90
 EXIT_SLIPPAGE = 0.10          # stop/time exits pay ~the natural price: mid + $0.10 on the spread
 RISK_FREE = 0.04
 SKEW = 0.5                    # put IV = ATM IV x (1 + SKEW x ln(S/K)) for K < S
@@ -150,9 +149,14 @@ def spread_value(S, short, long, T, atm):
     return min(max(v, 0.0), short - long)
 
 
-def realized_vol(bars, i, n=RV_DAYS):
-    r = [math.log(bars[k]["c"] / bars[k - 1]["c"]) for k in range(max(1, i - n + 1), i + 1)]
-    return statistics.pstdev(r) * math.sqrt(252) if len(r) > 2 else 0.4
+def realized_vol_series(bars, n=RV_DAYS):
+    """20-day realized vol at every bar (annualized), precomputed once."""
+    closes = [b["c"] for b in bars]
+    out = []
+    for i in range(len(bars)):
+        r = [math.log(closes[k] / closes[k - 1]) for k in range(max(1, i - n + 1), i + 1)]
+        out.append(statistics.pstdev(r) * math.sqrt(252) if len(r) > 2 else 0.4)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -170,36 +174,62 @@ def strike_grid(ceiling):
     return [round(top - j * step, 2) for j in range(0, 60) if top - j * step > 0][::-1]
 
 
-def monthly_expirations(first: date, last: date, trading: set[date], last_bar: date):
-    out, y, m = [], first.year, first.month
+def expirations(first: date, last: date, trading: set[date], last_bar: date):
+    """{'monthly': 3rd Fridays, 'weekly': every Friday}; a holiday Friday moves to Thursday."""
+    def fix(d):
+        return d - timedelta(days=1) if d <= last_bar and d not in trading else d
+    monthly, y, m = [], first.year, first.month
     while date(y, m, 1) <= last:
-        tf = rules.third_friday(y, m)
-        if tf <= last_bar and tf not in trading:          # holiday Friday -> Thursday
-            tf -= timedelta(days=1)
-        out.append(tf)
+        monthly.append(fix(rules.third_friday(y, m)))
         y, m = (y + 1, 1) if m == 12 else (y, m + 1)
-    return out
+    d = first + timedelta(days=(4 - first.weekday()) % 7)
+    weekly = []
+    while d <= last:
+        weekly.append(fix(d))
+        d += timedelta(days=7)
+    return {"monthly": monthly, "weekly": weekly}
 
 
 # --------------------------------------------------------------------------- #
 # simulation
 # --------------------------------------------------------------------------- #
-def simulate(bars, earnings, exps, mode, iv_factor, fixed_otm=None):
-    """mode 'signal': enter after a lower-band cross. mode 'baseline': enter whenever flat,
-    short strike fixed_otm below the close (same expiration/width/exit rules)."""
+VARIANTS = {
+    # name: (entry, strike offset below min(POC, band), (DTE min, max), weeklies allowed)
+    "as written":   ("below",   0.00, (45, 90), False),
+    "A":            ("reclaim", 0.00, (45, 90), False),
+    "B":            ("below",   0.05, (45, 90), False),
+    "D":            ("below",   0.00, (30, 60), True),
+    "A+B":          ("reclaim", 0.05, (45, 90), False),
+    "A+D":          ("reclaim", 0.00, (30, 60), True),
+    "B+D":          ("below",   0.05, (30, 60), True),
+    "A+B+D":        ("reclaim", 0.05, (30, 60), True),
+}
+
+
+def simulate(bars, earnings, exps, mode, iv_factor, variant, rv, fixed_otm=None):
+    """mode 'signal': enter on the variant's signal. mode 'baseline': enter whenever flat,
+    short strike fixed_otm below the close (same expiration/width/exit rules).
+    variant = (entry 'below'|'reclaim', strike offset, (dte_min, dte_max), weeklies)."""
+    entry_kind, offset, (dmin, dmax), weekly = variant
+    exp_list = exps["weekly" if weekly else "monthly"]
+    signal_fn = rules.cross_below_lower if entry_kind == "below" else rules.cross_above_lower
     closes = [b["c"] for b in bars]
     trades, skips, busy_until = [], {}, -1
+
+    def skip(k):
+        skips[k] = skips.get(k, 0) + 1
+
     start = max(rules.BB_PERIOD + 1, rules.POC_LOOKBACK)
     for i in range(start, len(bars) - 1):
         if mode == "signal":
-            hit = rules.cross_below_lower(bars, i)
+            hit = signal_fn(bars, i)
             if not hit:
                 continue
             if i < busy_until:
-                skips["spread already open on the ticker"] = skips.get("spread already open on the ticker", 0) + 1
+                skip("spread already open")
                 continue
             poc = rules.volume_profile_poc(bars[:i + 1])
-            ceiling_poc, ceiling_band = poc, hit["lower"]
+            ceiling_poc, ceiling_band = poc * (1 - offset), hit["lower"] * (1 - offset)
         else:
             if i < busy_until:
                 continue
@@ -208,9 +238,9 @@ def simulate(bars, earnings, exps, mode, iv_factor, fixed_otm=None):
         e = i + 1                                          # entry the next morning
         ed = bars[e]["d"]
         nxt = next((x for x in earnings if x >= ed), None)
-        cands = [x for x in exps if DTE_MIN <= (x - ed).days <= DTE_MAX and (nxt is None or x < nxt)]
+        cands = [x for x in exp_list if dmin <= (x - ed).days <= dmax and (nxt is None or x < nxt)]
         if not cands:
-            skips["no monthly before earnings"] = skips.get("no monthly before earnings", 0) + 1
+            skip("no expiration before earnings")
             if mode == "baseline":
                 busy_until = e
             continue
@@ -218,17 +248,16 @@ def simulate(bars, earnings, exps, mode, iv_factor, fixed_otm=None):
         ceiling = min(ceiling_poc, ceiling_band)
         picked = rules.pick_strikes(strike_grid(ceiling), ceiling_poc, ceiling_band, rules.target_width(closes[i]))
         if not picked:
-            skips["no strikes"] = skips.get("no strikes", 0) + 1
+            skip("no strikes")
             continue
         short, long = picked
-        atm = realized_vol(bars, i) * iv_factor
         S0 = bars[e]["o"]
-        credit = round(spread_value(S0, short, long, (exp - ed).days / 365, atm), 2)
-        otm = 1 - short / S0
+        credit = round(spread_value(S0, short, long, (exp - ed).days / 365, rv[i] * iv_factor), 2)
         t = dict(mode=mode, signal=bars[i]["d"], entry=ed, expiration=exp, entry_price=S0, short=short, long=long,
-                 width=short - long, otm_pct=otm, credit=credit, poc=poc, lower=hit["lower"] if hit else None)
+                 width=short - long, otm_pct=1 - short / S0, credit=credit, poc=poc,
+                 lower=hit["lower"] if hit else None)
         # stock-side (no option prices): first close below the short before the time stop
-        breach = None
+        breach, d = None, e
         for d in range(e, len(bars)):
             if (exp - bars[d]["d"]).days <= rules.TIME_STOP_DTE:
                 break
@@ -247,7 +276,7 @@ def simulate(bars, earnings, exps, mode, iv_factor, fixed_otm=None):
         exit_i = reason = None
         for d in range(e, len(bars)):
             dte = (exp - bars[d]["d"]).days
-            val = spread_value(closes[d], short, long, max(dte, 0) / 365, realized_vol(bars, d) * iv_factor)
+            val = spread_value(closes[d], short, long, max(dte, 0) / 365, rv[d] * iv_factor)
             reason = rules.exit_reason(credit, val, closes[d], short, dte)
             if reason:
                 exit_i = d
@@ -265,47 +294,19 @@ def simulate(bars, earnings, exps, mode, iv_factor, fixed_otm=None):
     return trades, skips
 
 
-def summarize(label, trades, skips, crosses=None):
-    taken = [t for t in trades if t.get("taken") and t.get("pnl") is not None]
-    considered = [t for t in trades]
-    lines = [f"\n=== {label} ==="]
-    if crosses is not None:
-        lines.append(f"lower-band crosses: {crosses}")
-    lines.append(f"expiration/strikes found: {len(considered)}   skipped: "
-                 + (", ".join(f"{k} {v}" for k, v in skips.items()) or "none"))
-    if considered:
-        br = sum(t["breached_short"] for t in considered)
-        otm = [t["otm_pct"] for t in considered]
-        lines.append(f"[stock-side] short strike below the entry price: median {statistics.median(otm):.1%} "
-                     f"(range {min(otm):.1%} to {max(otm):.1%})")
-        lines.append(f"[stock-side] closed below the short strike before 21 DTE: {br}/{len(considered)} "
-                     f"({br / len(considered):.0%})")
-    low = [t for t in considered if not t.get("taken")]
-    lines.append(f"[model] skipped for credit < ${MIN_CREDIT:.2f}: {len(low)}")
-    if taken:
-        pnl = [t["pnl"] for t in taken]
-        eq = peak = dd = 0.0
-        for p in pnl:
-            eq += p
-            peak = max(peak, eq)
-            dd = min(dd, eq - peak)
-        wins = sum(p > 0 for p in pnl)
-        reasons = {}
-        for t in taken:
-            reasons[t["exit_reason"]] = reasons.get(t["exit_reason"], 0) + 1
-        sd = statistics.pstdev(pnl) if len(pnl) > 1 else 0
-        tstat = (statistics.mean(pnl) / (sd / math.sqrt(len(pnl)))) if sd else 0
-        lines.append(f"[model] trades {len(pnl)}, won {wins} ({wins / len(pnl):.0%}), total ${sum(pnl):,.0f}, "
-                     f"avg ${statistics.mean(pnl):,.0f}, worst ${min(pnl):,.0f}, max drawdown ${dd:,.0f}, t={tstat:.1f}")
-        lines.append(f"[model] avg credit ${statistics.mean(t['credit'] for t in taken):.2f}, "
-                     f"avg width ${statistics.mean(t['width'] for t in taken):.2f}, "
-                     f"avg days held {statistics.mean(t['days'] for t in taken):.0f}")
-        lines.append("[model] exits: " + ", ".join(f"{k} {v}" for k, v in sorted(reasons.items())))
-        years = {}
-        for t in taken:
-            years[t["entry"].year] = years.get(t["entry"].year, 0) + t["pnl"]
-        lines.append("[model] by year: " + ", ".join(f"{y} ${v:,.0f}" for y, v in sorted(years.items())))
-    return "\n".join(lines)
+def stats(trades):
+    taken = [t["pnl"] for t in trades if t.get("pnl") is not None]
+    out = dict(found=len(trades), breach=sum(t["breached_short"] for t in trades), n=len(taken),
+               wins=sum(p > 0 for p in taken), total=sum(taken), worst=min(taken) if taken else 0,
+               otm=statistics.median([t["otm_pct"] for t in trades]) if trades else None, dd=0.0, t=0.0)
+    eq = peak = 0.0
+    for p in taken:
+        eq += p
+        peak = max(peak, eq)
+        out["dd"] = min(out["dd"], eq - peak)
+    if len(taken) > 1 and statistics.pstdev(taken):
+        out["t"] = statistics.mean(taken) / (statistics.pstdev(taken) / math.sqrt(len(taken)))
+    return out
 
 
 def main():
@@ -323,38 +324,62 @@ def main():
     if len(bars) < 200:
         sys.exit(f"only {len(bars)} bars")
     trading = {b["d"] for b in bars}
-    exps = monthly_expirations(bars[0]["d"], bars[-1]["d"] + timedelta(days=120), trading, bars[-1]["d"])
+    exps = expirations(bars[0]["d"], bars[-1]["d"] + timedelta(days=120), trading, bars[-1]["d"])
     print(f"{symbol}: {len(bars)} daily bars {bars[0]['d']} .. {bars[-1]['d']}, "
           f"{sum(1 for e in earnings if bars[0]['d'] <= e <= bars[-1]['d'] + timedelta(days=120))} earnings dates in range")
 
-    crosses = sum(1 for i in range(max(rules.BB_PERIOD + 1, rules.POC_LOOKBACK), len(bars) - 1)
-                  if rules.cross_below_lower(bars, i))
-    out_rows, report = [], []
-    for f in IV_FACTORS:
-        sig_trades, sig_skips = simulate(bars, earnings, exps, "signal", f)
-        otm = statistics.median([t["otm_pct"] for t in sig_trades]) if sig_trades else 0.10
-        base_trades, base_skips = simulate(bars, earnings, exps, "baseline", f, fixed_otm=otm)
-        if f == 1.0:
-            report.append(summarize(f"SIGNAL strategy (IV = realized x {f})", sig_trades, sig_skips, crosses))
-            report.append(summarize(f"NO-SIGNAL baseline, short {otm:.1%} below the close (IV x {f})",
-                                    base_trades, base_skips))
-            out_rows = sig_trades + base_trades
-        else:
-            taken = [t["pnl"] for t in sig_trades if t.get("pnl") is not None]
-            btaken = [t["pnl"] for t in base_trades if t.get("pnl") is not None]
-            report.append(f"\n[sensitivity IV x {f}] signal: {len(taken)} trades ${sum(taken):,.0f} | "
-                          f"baseline: {len(btaken)} trades ${sum(btaken):,.0f}")
-    print("\n".join(report))
-    print("\nSignal trades (IV x 1.0):")
-    for t in out_rows:
-        if t["mode"] != "signal":
-            continue
-        print(f"  {t['signal']} -> {t['entry']} exp {t['expiration']}  {t['short']:g}/{t['long']:g}P "
-              f"({t['otm_pct']:.1%} OTM)  credit~{t['credit']:.2f}  "
-              f"{'BREACHED' if t['breached_short'] else 'held   '}  {t['exit_reason']}"
-              + (f"  ${t['pnl']:,.0f}" if t.get("pnl") is not None else ""))
+    rv = realized_vol_series(bars)
+    rows, all_trades, details = [], [], {}
+    for name, v in VARIANTS.items():
+        kind = "cross below band" if v[0] == "below" else "close back above band"
+        n_sig = sum(1 for i in range(max(rules.BB_PERIOD + 1, rules.POC_LOOKBACK), len(bars) - 1)
+                    if (rules.cross_below_lower if v[0] == "below" else rules.cross_above_lower)(bars, i))
+        res = {}
+        for f in IV_FACTORS:
+            sig, skips = simulate(bars, earnings, exps, "signal", f, v, rv)
+            otm = statistics.median([t["otm_pct"] for t in sig]) if sig else 0.05
+            base, _ = simulate(bars, earnings, exps, "baseline", f, v, rv, fixed_otm=otm)
+            res[f] = (stats(sig), stats(base), skips)
+            if f == 1.0:
+                details[name] = sig
+                for t in sig + base:
+                    t["variant"] = name
+                all_trades += sig + base
+        s1, b1, skips = res[1.0]
+        rows.append((name, kind, v, n_sig, skips, s1, b1, res[0.8][0]["total"], res[1.2][0]["total"],
+                     res[0.8][1]["total"], res[1.2][1]["total"]))
+
+    print("\nVariants: A = enter when the close gets back above the lower band;"
+          " B = short strike 5% below min(POC, band); D = 30-60 DTE, weeklies allowed.")
+    print("Stock-side columns need no option prices. Model columns use Black-Scholes (IV = realized x 1.0;"
+          " totals at x0.8 / x1.2 in brackets).\n")
+    hdr = (f"{'variant':<11}{'signals':>8}{'trades':>7}{'short OTM':>10}{'breached':>9}"
+           f"{'model n':>8}{'win':>5}{'total':>9}{'worst':>7}{'maxDD':>8}{'t':>6}   {'IV x0.8 / x1.2':<17}"
+           f"{'baseline total':>15}{'base breached':>14}")
+    print(hdr)
+    print("-" * len(hdr))
+    for name, kind, v, n_sig, skips, s1, b1, t08, t12, bt08, bt12 in rows:
+        br = f"{s1['breach'] / s1['found']:.0%}" if s1["found"] else "-"
+        bbr = f"{b1['breach'] / b1['found']:.0%}" if b1["found"] else "-"
+        otm = f"{s1['otm']:.1%}" if s1["otm"] is not None else "-"
+        win = f"{s1['wins'] / s1['n']:.0%}" if s1["n"] else "-"
+        print(f"{name:<11}{n_sig:>8}{s1['found']:>7}{otm:>10}{br:>9}{s1['n']:>8}{win:>5}"
+              f"{s1['total']:>9,.0f}{s1['worst']:>7,.0f}{s1['dd']:>8,.0f}{s1['t']:>6.1f}   "
+              f"{f'{t08:,.0f} / {t12:,.0f}':<17}{b1['total']:>15,.0f}{bbr:>14}")
+    print("\nSkipped signals per variant:")
+    for name, kind, v, n_sig, skips, *_ in rows:
+        print(f"  {name:<11}" + (", ".join(f"{k} {c}" for k, c in skips.items()) or "none"))
+
+    for name in ("A+B+D", max(details, key=lambda k: stats(details[k])["total"])):
+        print(f"\nSignal trades, {name} (IV x 1.0):")
+        for t in details[name]:
+            print(f"  {t['signal']} -> {t['entry']} exp {t['expiration']}  {t['short']:g}/{t['long']:g}P "
+                  f"({t['otm_pct']:.1%} OTM)  credit~{t['credit']:.2f}  "
+                  f"{'BREACHED' if t['breached_short'] else 'held   '}  {t['exit_reason']}"
+                  + (f"  ${t['pnl']:,.0f}" if t.get("pnl") is not None else ""))
+    out_rows = all_trades
     path = HERE / "bb_backtest_trades.csv"
-    keys = ["mode", "signal", "entry", "expiration", "entry_price", "short", "long", "width", "otm_pct", "credit",
+    keys = ["variant", "mode", "signal", "entry", "expiration", "entry_price", "short", "long", "width", "otm_pct", "credit",
             "breached_short", "min_close_vs_short", "taken", "exit", "exit_reason", "exit_price", "pnl", "days",
             "poc", "lower"]
     with path.open("w", newline="") as f:

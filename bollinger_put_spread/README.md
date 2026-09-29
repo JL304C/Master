@@ -108,6 +108,12 @@ writes `bb_backtest_trades.csv`.
 - **Model P&L:** the spread is priced with Black-Scholes (IV = 20-day realized vol × 0.8 / 1.0 / 1.2, plus a put skew),
   and the $0.50 minimum credit and all four exits are applied. It is a model: on the NVDA condor the same kind of
   model overstated real credits by about 80%. Real prices need Databento OPRA.
+- **Variants:** it runs all 8 combinations of three changes to the rules:
+  - **A:** enter when the close gets back above the lower band;
+  - **B:** short strike 5% below min(POC, band);
+  - **D:** 30–60 DTE, weekly expirations allowed.
+
+  It prints one comparison table, plus the trade lists for A+B+D and for the best variant.
 - **Baseline:** the same rules entered whenever flat, with the short strike the same distance below the price. This
   shows whether the signal adds anything.
 - **Approximations:**

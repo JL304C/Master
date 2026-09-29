@@ -51,6 +51,21 @@ def cross_below_lower(bars: list[dict], i: int | None = None) -> dict | None:
     return None
 
 
+def cross_above_lower(bars: list[dict], i: int | None = None) -> dict | None:
+    """Reclaim signal (backtest variant A): close[i] >= lower[i] after close[i-1] < lower[i-1],
+    i.e. the stock closes back inside the bands after an oversold close."""
+    if i is None:
+        i = len(bars) - 1
+    closes = [b["c"] for b in bars]
+    today, yday = bollinger(closes, i), bollinger(closes, i - 1)
+    if today is None or yday is None:
+        return None
+    if closes[i] >= today[1] and closes[i - 1] < yday[1]:
+        return {"sma": today[0], "lower": today[1], "upper": today[2],
+                "close": closes[i], "prev_close": closes[i - 1], "prev_lower": yday[1]}
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # strike selection
 # --------------------------------------------------------------------------- #
