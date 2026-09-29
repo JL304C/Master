@@ -370,7 +370,8 @@ def main():
     for name, kind, v, n_sig, skips, *_ in rows:
         print(f"  {name:<11}" + (", ".join(f"{k} {c}" for k, c in skips.items()) or "none"))
 
-    for name in ("A+B+D", max(details, key=lambda k: stats(details[k])["total"])):
+    best = max(details, key=lambda k: stats(details[k])["total"])
+    for name in dict.fromkeys(("A+B+D", best)):          # once each, even when the best is A+B+D
         print(f"\nSignal trades, {name} (IV x 1.0):")
         for t in details[name]:
             print(f"  {t['signal']} -> {t['entry']} exp {t['expiration']}  {t['short']:g}/{t['long']:g}P "
