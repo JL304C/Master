@@ -8,7 +8,17 @@ That means it can share the account with the condor bot and the other bots.
 **Not backtested yet.** The condor strategy was backtested before its bot was written. This strategy has not been.
 Treat the paper results as the first test.
 
-## Rules
+> **Current settings: backtest variant A+B+D** (chosen 2026-09-29 after the stock-side backtest below).
+> - **A:** the signal is a close back *above* the lower band the day after an oversold close.
+> - **B:** the short strike is 5% below the lower of the POC and the band.
+> - **D:** expirations are 30–60 DTE, and weekly expirations are allowed.
+>
+> On AMD over 2016–2026 this cut the share of trades where the stock closed below the short strike from 82% to 21%.
+> The model result is about break-even: +$48 over 11 trades, t = 0.3. So it is paper-trading only while more
+> tickers are tested. The original rules below are one switch away: `ENTRY_SIGNAL = "cross_below"`,
+> `STRIKE_OFFSET = 0.0`, `DTE_MIN, DTE_MAX = 45, 90`, `MONTHLY_ONLY = True`.
+
+## Rules (as originally specified)
 
 | Step | Rule |
 |---|---|
@@ -80,7 +90,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 59 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 61 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;
@@ -99,6 +109,13 @@ earnings dates from Alpha Vantage `EARNINGS` and `EARNINGS_CALENDAR`, which cost
 
 Run: `python bb_stock_backtest.py` (options: `--symbol AMD --start 2016-01-01`). It uses the same `.env` as the bot and
 writes `bb_backtest_trades.csv`.
+
+Several tickers in one run: `python bb_stock_backtest.py --symbols AMD,MSFT,GOOGL,META,AMZN,JPM,XOM,UNH,CAT,COST,SPY`
+- It prints a pooled table of every variant across all tickers, plus per-ticker rows for A+B+D and the original rules.
+- Each new ticker costs 2 Alpha Vantage requests (the free limit is 25 a day). The results are cached for the day,
+  and the requests are spaced about 13 seconds apart, so 10 new tickers take about 5 minutes.
+- A ticker that fails, for example after the daily limit is hit, is skipped with a message. ETFs such as SPY have no
+  earnings, so no earnings filter applies to them.
 
 - **Stock-side, no option prices:**
   - how often the signal fires;

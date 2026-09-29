@@ -22,7 +22,8 @@ Both parts are compared with a no-signal baseline: the same rules and the same
 distance below the price, entered whenever no spread is open.
 
 Run on the laptop (uses the bot's .env):   python bb_stock_backtest.py
-Options:  --symbol AMD  --start 2016-01-01
+Options:  --symbol AMD  or  --symbols AMD,MSFT,JPM   (pooled table + per-ticker rows)
+          --start 2016-01-01
           --csv bars.csv --earnings dates.txt   (offline: date,open,high,low,close,volume / one date per line)
 Writes bb_backtest_trades.csv next to the script.
 """
@@ -95,8 +96,16 @@ def bars_from_alpaca(symbol, start):
                  c=float(b.close), v=float(b.volume)) for b in bars]
 
 
+class DataError(Exception):
+    pass
+
+
+_last_av_call = [0.0]
+
+
 def earnings_from_alpha_vantage(symbol):
-    """Past report dates (EARNINGS) + the next one (EARNINGS_CALENDAR); cached per day."""
+    """Past report dates (EARNINGS) + the next one (EARNINGS_CALENDAR); cached per day.
+    2 requests per ticker, spaced out for the free tier. ETFs have no earnings -> []."""
     cache = HERE / f"bb_backtest_earnings_{symbol}.json"
     if cache.exists():
         c = json.loads(cache.read_text())
@@ -107,17 +116,24 @@ def earnings_from_alpha_vantage(symbol):
         sys.exit("ALPHAVANTAGE_API_KEY missing from .env")
 
     def get(**params):
+        import time
+        wait = 13 - (time.time() - _last_av_call[0])      # free tier: stay under 5 calls a minute
+        if wait > 0:
+            time.sleep(wait)
+        _last_av_call[0] = time.time()
         url = "https://www.alphavantage.co/query?" + urllib.parse.urlencode({**params, "apikey": key})
         with urllib.request.urlopen(url, timeout=60) as r:
             return r.read().decode("utf-8", "replace")
 
     hist = json.loads(get(function="EARNINGS", symbol=symbol))
-    if "quarterlyEarnings" not in hist:
-        sys.exit(f"Alpha Vantage EARNINGS failed: {str(hist)[:200]}")
-    dates = {date.fromisoformat(q["reportedDate"]) for q in hist["quarterlyEarnings"] if q.get("reportedDate")}
+    if "Information" in hist or "Note" in hist or "Error Message" in hist:
+        raise DataError(f"Alpha Vantage EARNINGS: {str(hist)[:160]}")
+    dates = {date.fromisoformat(q["reportedDate"]) for q in hist.get("quarterlyEarnings", []) if q.get("reportedDate")}
     ok, nxt = rules.parse_earnings_csv(get(function="EARNINGS_CALENDAR", symbol=symbol, horizon="6month"),
                                        symbol, date.today())
-    if ok and nxt:
+    if not ok and dates:
+        raise DataError("Alpha Vantage EARNINGS_CALENDAR failed (daily limit?)")
+    if nxt:
         dates.add(nxt)
     dates = sorted(dates)
     cache.write_text(json.dumps({"fetched": date.today().isoformat(), "dates": [d.isoformat() for d in dates]}))
@@ -309,29 +325,20 @@ def stats(trades):
     return out
 
 
-def main():
-    load_env()
-    symbol = (arg("--symbol") or "AMD").upper()
-    start = date.fromisoformat(arg("--start", "2016-01-01"))
-    if arg("--csv"):
-        bars = bars_from_csv(arg("--csv"))
-    else:
-        bars = bars_from_alpaca(symbol, start)
-    if arg("--earnings"):
-        earnings = rules_load_dates(arg("--earnings"))
-    else:
-        earnings = earnings_from_alpha_vantage(symbol)
+def run_symbol(symbol, start):
+    """All variants for one ticker -> (rows, trades, details, header line)."""
+    bars = bars_from_csv(arg("--csv")) if arg("--csv") else bars_from_alpaca(symbol, start)
+    earnings = rules_load_dates(arg("--earnings")) if arg("--earnings") else earnings_from_alpha_vantage(symbol)
     if len(bars) < 200:
-        sys.exit(f"only {len(bars)} bars")
+        raise DataError(f"only {len(bars)} daily bars")
     trading = {b["d"] for b in bars}
     exps = expirations(bars[0]["d"], bars[-1]["d"] + timedelta(days=120), trading, bars[-1]["d"])
-    print(f"{symbol}: {len(bars)} daily bars {bars[0]['d']} .. {bars[-1]['d']}, "
-          f"{sum(1 for e in earnings if bars[0]['d'] <= e <= bars[-1]['d'] + timedelta(days=120))} earnings dates in range")
-
+    head = (f"{symbol}: {len(bars)} daily bars {bars[0]['d']} .. {bars[-1]['d']}, "
+            f"{sum(1 for e in earnings if bars[0]['d'] <= e <= bars[-1]['d'] + timedelta(days=120))} earnings dates in range"
+            + ("" if earnings else " (none: ETF/fund, no earnings filter)"))
     rv = realized_vol_series(bars)
     rows, all_trades, details = [], [], {}
     for name, v in VARIANTS.items():
-        kind = "cross below band" if v[0] == "below" else "close back above band"
         n_sig = sum(1 for i in range(max(rules.BB_PERIOD + 1, rules.POC_LOOKBACK), len(bars) - 1)
                     if (rules.cross_below_lower if v[0] == "below" else rules.cross_above_lower)(bars, i))
         res = {}
@@ -339,54 +346,107 @@ def main():
             sig, skips = simulate(bars, earnings, exps, "signal", f, v, rv)
             otm = statistics.median([t["otm_pct"] for t in sig]) if sig else 0.05
             base, _ = simulate(bars, earnings, exps, "baseline", f, v, rv, fixed_otm=otm)
-            res[f] = (stats(sig), stats(base), skips)
+            for t in sig + base:
+                t["variant"], t["symbol"] = name, symbol
+            res[f] = (sig, base, skips)
             if f == 1.0:
                 details[name] = sig
-                for t in sig + base:
-                    t["variant"] = name
                 all_trades += sig + base
-        s1, b1, skips = res[1.0]
-        rows.append((name, kind, v, n_sig, skips, s1, b1, res[0.8][0]["total"], res[1.2][0]["total"],
-                     res[0.8][1]["total"], res[1.2][1]["total"]))
+        rows.append(dict(name=name, n_sig=n_sig, skips=res[1.0][2], sig=res[1.0][0], base=res[1.0][1],
+                         sig08=res[0.8][0], sig12=res[1.2][0]))
+    return rows, all_trades, details, head
 
-    print("\nVariants: A = enter when the close gets back above the lower band;"
-          " B = short strike 5% below min(POC, band); D = 30-60 DTE, weeklies allowed.")
-    print("Stock-side columns need no option prices. Model columns use Black-Scholes (IV = realized x 1.0;"
-          " totals at x0.8 / x1.2 in brackets).\n")
-    hdr = (f"{'variant':<11}{'signals':>8}{'trades':>7}{'short OTM':>10}{'breached':>9}"
+
+def print_table(rows, label_key="name", width=11):
+    hdr = (f"{'':<{width}}{'signals':>8}{'trades':>7}{'short OTM':>10}{'breached':>9}"
            f"{'model n':>8}{'win':>5}{'total':>9}{'worst':>7}{'maxDD':>8}{'t':>6}   {'IV x0.8 / x1.2':<17}"
            f"{'baseline total':>15}{'base breached':>14}")
     print(hdr)
     print("-" * len(hdr))
-    for name, kind, v, n_sig, skips, s1, b1, t08, t12, bt08, bt12 in rows:
+    for r in rows:
+        s1, b1 = stats(r["sig"]), stats(r["base"])
+        t08, t12 = stats(r["sig08"])["total"], stats(r["sig12"])["total"]
         br = f"{s1['breach'] / s1['found']:.0%}" if s1["found"] else "-"
         bbr = f"{b1['breach'] / b1['found']:.0%}" if b1["found"] else "-"
         otm = f"{s1['otm']:.1%}" if s1["otm"] is not None else "-"
         win = f"{s1['wins'] / s1['n']:.0%}" if s1["n"] else "-"
-        print(f"{name:<11}{n_sig:>8}{s1['found']:>7}{otm:>10}{br:>9}{s1['n']:>8}{win:>5}"
+        print(f"{r[label_key]:<{width}}{r['n_sig']:>8}{s1['found']:>7}{otm:>10}{br:>9}{s1['n']:>8}{win:>5}"
               f"{s1['total']:>9,.0f}{s1['worst']:>7,.0f}{s1['dd']:>8,.0f}{s1['t']:>6.1f}   "
               f"{f'{t08:,.0f} / {t12:,.0f}':<17}{b1['total']:>15,.0f}{bbr:>14}")
-    print("\nSkipped signals per variant:")
-    for name, kind, v, n_sig, skips, *_ in rows:
-        print(f"  {name:<11}" + (", ".join(f"{k} {c}" for k, c in skips.items()) or "none"))
 
-    best = max(details, key=lambda k: stats(details[k])["total"])
-    for name in dict.fromkeys(("A+B+D", best)):          # once each, even when the best is A+B+D
-        print(f"\nSignal trades, {name} (IV x 1.0):")
-        for t in details[name]:
-            print(f"  {t['signal']} -> {t['entry']} exp {t['expiration']}  {t['short']:g}/{t['long']:g}P "
-                  f"({t['otm_pct']:.1%} OTM)  credit~{t['credit']:.2f}  "
-                  f"{'BREACHED' if t['breached_short'] else 'held   '}  {t['exit_reason']}"
-                  + (f"  ${t['pnl']:,.0f}" if t.get("pnl") is not None else ""))
-    out_rows = all_trades
+
+def by_entry(trades):
+    return sorted(trades, key=lambda t: t["entry"])
+
+
+def print_trades(title, trades):
+    print(f"\n{title}:")
+    for t in trades:
+        print(f"  {t.get('symbol', ''):<6}{t['signal']} -> {t['entry']} exp {t['expiration']}  {t['short']:g}/{t['long']:g}P "
+              f"({t['otm_pct']:.1%} OTM)  credit~{t['credit']:.2f}  "
+              f"{'BREACHED' if t['breached_short'] else 'held   '}  {t['exit_reason']}"
+              + (f"  ${t['pnl']:,.0f}" if t.get("pnl") is not None else ""))
+
+
+def main():
+    load_env()
+    start = date.fromisoformat(arg("--start", "2016-01-01"))
+    symbols = [x.strip().upper() for x in (arg("--symbols") or arg("--symbol") or "AMD").split(",") if x.strip()]
+    print("Variants: A = enter when the close gets back above the lower band;"
+          " B = short strike 5% below min(POC, band); D = 30-60 DTE, weeklies allowed.")
+    print("Stock-side columns need no option prices. Model columns use Black-Scholes (IV = realized x 1.0;"
+          " totals at x0.8 / x1.2).")
+    per, all_trades = {}, []
+    for sym in symbols:
+        try:
+            rows, trades, details, head = run_symbol(sym, start)
+        except Exception as exc:                          # noqa: BLE001 -- one bad ticker shouldn't stop the rest
+            print(f"\n{sym}: SKIPPED -- {exc}")
+            continue
+        per[sym] = rows
+        all_trades += trades
+        print("\n" + head)
+        if len(symbols) == 1:
+            print_table(rows)
+            print("\nSkipped signals per variant:")
+            for r in rows:
+                print(f"  {r['name']:<11}" + (", ".join(f"{k} {c}" for k, c in r["skips"].items()) or "none"))
+            best = max(details, key=lambda k: stats(details[k])["total"])
+            for name in dict.fromkeys(("A+B+D", best)):
+                print_trades(f"Signal trades, {name} (IV x 1.0)", details[name])
+        else:
+            abd = next(r for r in rows if r["name"] == "A+B+D")
+            s1 = stats(abd["sig"])
+            print(f"  A+B+D: {s1['found']} trades found, {s1['n']} taken, model ${s1['total']:,.0f}")
+
+    if len(per) > 1:
+        print(f"\n=== POOLED over {len(per)} tickers ({', '.join(per)}) ===")
+        pooled = []
+        for name in VARIANTS:
+            rs = [next(r for r in per[s] if r["name"] == name) for s in per]
+            pooled.append(dict(name=name, n_sig=sum(r["n_sig"] for r in rs), skips={},
+                               sig=by_entry(sum((r["sig"] for r in rs), [])),
+                               base=by_entry(sum((r["base"] for r in rs), [])),
+                               sig08=by_entry(sum((r["sig08"] for r in rs), [])),
+                               sig12=by_entry(sum((r["sig12"] for r in rs), []))))
+        print_table(pooled)
+        print("\n=== A+B+D by ticker ===")
+        print_table([dict(next(r for r in per[s] if r["name"] == "A+B+D"), ticker=s) for s in per],
+                    label_key="ticker", width=8)
+        print("\n=== as written by ticker ===")
+        print_table([dict(next(r for r in per[s] if r["name"] == "as written"), ticker=s) for s in per],
+                    label_key="ticker", width=8)
+        abd = by_entry(sum((next(r for r in per[s] if r["name"] == "A+B+D")["sig"] for s in per), []))
+        print_trades("A+B+D trades, all tickers (IV x 1.0)", [t for t in abd if t.get("taken")])
+
     path = HERE / "bb_backtest_trades.csv"
-    keys = ["variant", "mode", "signal", "entry", "expiration", "entry_price", "short", "long", "width", "otm_pct", "credit",
-            "breached_short", "min_close_vs_short", "taken", "exit", "exit_reason", "exit_price", "pnl", "days",
-            "poc", "lower"]
+    keys = ["symbol", "variant", "mode", "signal", "entry", "expiration", "entry_price", "short", "long", "width",
+            "otm_pct", "credit", "breached_short", "min_close_vs_short", "taken", "exit", "exit_reason",
+            "exit_price", "pnl", "days", "poc", "lower"]
     with path.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
-        w.writerows(out_rows)
+        w.writerows(all_trades)
     print(f"\nwrote {path.name}")
 
 

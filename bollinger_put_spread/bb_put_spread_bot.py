@@ -7,15 +7,20 @@ itself (recorded in bb_state.json), so it can share the paper account with the c
 bot and the other bots.
 
 Rules (bb_rules.py holds the pure logic):
+  Current settings = backtest variant A+B+D (see README); the original rules are one
+  config switch away (ENTRY_SIGNAL, STRIKE_OFFSET, DTE_MIN/DTE_MAX, MONTHLY_ONLY).
   SIGNAL  (run after the close, --signal)
-    Daily closes, Bollinger 50-day SMA +/- 2 sd. Signal = today's close crosses below the
-    lower band (yesterday's close was at or above yesterday's lower band). The signal,
-    the band and the 6-month volume-profile POC are saved for the next morning.
+    Daily closes, Bollinger 50-day SMA +/- 2 sd.
+      A (ENTRY_SIGNAL="reclaim"): today's close is back at/above the lower band after
+        yesterday's close below it.   ("cross_below": today's close crosses below it.)
+    The signal, the band and the 6-month volume-profile POC are saved for the next morning.
   ENTRY   (run the next trading morning, --enter)
-    Expiration: standard monthly (3rd Friday), 45-90 DTE, expiring before the next
-    earnings date (Alpha Vantage EARNINGS_CALENDAR); nearest one wins; none -> skip.
-    Short put = highest listed strike below BOTH the POC and the lower band;
-    long put = the listed strike nearest (short - 1% of the price), at least one strike down. One multi-leg DAY limit order at the mid credit, 1 contract.
+    Expiration: D -- 30-60 DTE, weeklies allowed (MONTHLY_ONLY=False), expiring before the
+    next earnings date (Alpha Vantage EARNINGS_CALENDAR); nearest one wins; none -> skip.
+    Short put: B -- highest listed strike below BOTH the POC and the lower band, each
+    lowered by STRIKE_OFFSET (5%).
+    Long put = the listed strike nearest (short - 1% of the price), at least one strike down.
+    One multi-leg DAY limit order at the mid credit, 1 contract.
     Skip if the mid credit < $0.50. Max 5 open spreads, 2 per sector, 1 per ticker.
     Optionally leaves a resting GTC buy-to-close at 50% of the credit once filled.
   EXITS   (run ~3:45 PM ET, --manage), using mid prices:
@@ -91,7 +96,11 @@ MAX_OPEN_TOTAL = 5
 MAX_PER_SECTOR = 2
 MAX_PER_TICKER = 1
 MIN_CREDIT = 0.50             # skip if the mid credit is below this
-DTE_MIN, DTE_MAX = 45, 90
+# Backtest variant A+B+D (bb_stock_backtest.py). Original rules: "cross_below", 0.0, 45, 90, True.
+ENTRY_SIGNAL = "reclaim"      # A: close back above the lower band ("cross_below" = first close below it)
+STRIKE_OFFSET = 0.05          # B: short strike below min(POC, lower band) x (1 - 5%)
+DTE_MIN, DTE_MAX = 30, 60     # D: 30-60 DTE ...
+MONTHLY_ONLY = False          # D: ... weekly expirations allowed
 RESTING_TP_ORDER = True       # leave a GTC buy-to-close at 50% of the credit after the fill
 EARNINGS_HORIZON = "6month"   # Alpha Vantage EARNINGS_CALENDAR horizon (covers 90 DTE)
 BAR_DAYS = 300                # calendar days of daily bars fetched (>= 126 trading days)
@@ -438,7 +447,7 @@ def run_signal(state: dict) -> None:
         if len(bars) < rules.POC_LOOKBACK:
             log({"action": "alert", "ticker": ticker, "reason": f"only {len(bars)} daily bars"})
             continue
-        hit = rules.cross_below_lower(bars)
+        hit = (rules.cross_above_lower if ENTRY_SIGNAL == "reclaim" else rules.cross_below_lower)(bars)
         closes = [b["c"] for b in bars]
         sma, lower, _ = rules.bollinger(closes, len(bars) - 1)
         if not hit:
@@ -454,7 +463,9 @@ def run_signal(state: dict) -> None:
             record_signal(sig, "skipped", why)
             continue
         state["pending_signals"] = [p for p in state["pending_signals"] if p["ticker"] != ticker] + [sig]
-        record_signal(sig, "pending", "close crossed below the lower band; order goes in next trading morning")
+        what = ("close back above the lower band after an oversold close" if ENTRY_SIGNAL == "reclaim"
+                else "close crossed below the lower band")
+        record_signal(sig, "pending", f"{what}; order goes in next trading morning")
 
 
 def run_enter(state: dict) -> None:
@@ -505,19 +516,20 @@ def enter_one(state: dict, sig: dict) -> None:
                                expiration_date_gte=(today + timedelta(days=DTE_MIN)).isoformat(),
                                expiration_date_lte=(today + timedelta(days=DTE_MAX)).isoformat())
     exps = rules.eligible_expirations([as_date(c.expiration_date) for c in contracts], today, earn,
-                                      DTE_MIN, DTE_MAX)
+                                      DTE_MIN, DTE_MAX, MONTHLY_ONLY)
     if not exps:
-        record_signal(sig, "skipped", f"no standard monthly {DTE_MIN}-{DTE_MAX} DTE before earnings {earn}")
+        record_signal(sig, "skipped", f"no {'standard monthly ' if MONTHLY_ONLY else ''}expiration {DTE_MIN}-{DTE_MAX} DTE before earnings {earn}")
         return
     exp = exps[0]
     by_strike = {float(c.strike_price): c.symbol for c in contracts if as_date(c.expiration_date) == exp}
     width_goal = rules.target_width(sig["close"])
-    picked = rules.pick_strikes(sorted(by_strike), sig["poc"], sig["lower"], width_goal)
+    poc_cap, band_cap = sig["poc"] * (1 - STRIKE_OFFSET), sig["lower"] * (1 - STRIKE_OFFSET)
+    picked = rules.pick_strikes(sorted(by_strike), poc_cap, band_cap, width_goal)
     if picked is None:
-        ceiling = min(sig["poc"], sig["lower"])
+        ceiling = min(poc_cap, band_cap)
         near = [k for k in sorted(by_strike) if ceiling - 40 <= k <= ceiling + 10]
         record_signal(sig, "skipped", f"no listed short/long pair below "
-                                      f"min(POC {sig['poc']:.2f}, lower band {sig['lower']:.2f}) for {exp}; "
+                                      f"min(POC {sig['poc']:.2f}, lower band {sig['lower']:.2f}) x {1 - STRIKE_OFFSET:.2f} for {exp}; "
                                       f"listed strikes near there: {near or 'none'} "
                                       f"({len(by_strike)} puts listed for {exp})", expiration=exp.isoformat())
         return

@@ -141,15 +141,16 @@ def is_standard_monthly(exp: date, listed: set[date] | None = None) -> bool:
 
 
 def eligible_expirations(listed: list[date], today: date, next_earnings: date | None,
-                         dte_min: int = 45, dte_max: int = 90) -> list[date]:
-    """Standard monthlies with dte_min..dte_max DTE that expire BEFORE the next earnings
-    date (an expiration on the earnings day itself is skipped too). Sorted, nearest first."""
+                         dte_min: int = 45, dte_max: int = 90, monthly_only: bool = True) -> list[date]:
+    """Expirations with dte_min..dte_max DTE that expire BEFORE the next earnings date (an
+    expiration on the earnings day itself is skipped too) -- standard monthlies only unless
+    monthly_only is False (weeklies allowed). Sorted, nearest first."""
     s = set(listed)
     out = []
     for e in sorted(s):
         if not (dte_min <= (e - today).days <= dte_max):
             continue
-        if not is_standard_monthly(e, s):
+        if monthly_only and not is_standard_monthly(e, s):
             continue
         if next_earnings is not None and e >= next_earnings:
             continue

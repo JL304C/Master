@@ -112,16 +112,22 @@ def weekdays_back(end, n):
 
 
 def make_bars(end, crash):
-    """~200 sessions oscillating around 160 (volume heaviest near 165), ending on `end`;
-    the last close is 150 when crash=True (well under the lower band)."""
+    """~200 sessions oscillating around 160 (volume heaviest near 165), ending on `end`.
+    crash=True: an oversold close of 150 (under the lower band) the day before, then a close
+    of 157, back above the band -- the variant-A "reclaim" signal on the last bar.
+    crash="below": the last close is 150, the original rules' cross-below signal."""
     days = weekdays_back(end, 200)
     bars = []
     for i, d in enumerate(days):
         c = 160 + 4 * math.sin(i / 3)
         bars.append(dict(d=d, o=c, h=c + 1.5, l=c - 1.5, c=c, v=(3e6 if 163 < c < 166 else 1e6)))
-    if crash:
+    if crash == "below":
         bars[-1].update(c=150.0, l=149.0, o=158.0, h=158.5)
         bars[-2].update(c=160.0)
+    elif crash:
+        bars[-3].update(c=160.0)
+        bars[-2].update(c=150.0, l=149.0, o=158.0, h=158.5)
+        bars[-1].update(c=157.0, l=150.0, o=151.0, h=157.5)
     return bars
 
 
@@ -259,13 +265,16 @@ with tempfile.TemporaryDirectory() as tmp:
         check("B1 mleg DAY limit, negative (credit) price, 1 contract",
               req.order_class.value == "mleg" and req.limit_price < 0 and req.qty == 1
               and req.time_in_force == TimeInForce.DAY, str(req.limit_price))
-        check("B1 STO short / BTO long, $5 wide", req.legs[0].position_intent == PositionIntent.SELL_TO_OPEN
-              and req.legs[1].position_intent == PositionIntent.BUY_TO_OPEN and sk - lk == 5, f"{sk}/{lk}")
-        check("B1 short below both POC and lower band", sk < sig["poc"] and sk < sig["lower"],
-              f"short {sk} poc {sig['poc']:.2f} lower {sig['lower']:.2f}")
-        check("B1 short is the highest such strike", sk + 5 >= min(sig["poc"], sig["lower"]))
-        check("B1 expiration is a standard monthly 45-90 DTE", exp == monthly(exp.year, exp.month)
-              and 45 <= (exp - ENTRY_DAY).days <= 90, str(exp))
+        cap = min(sig["poc"], sig["lower"]) * (1 - bot.STRIKE_OFFSET)
+        step = 5 if exp == monthly(exp.year, exp.month) else 2.5
+        check("B1 STO short / BTO long, next strike down (1% of 157 < one strike)",
+              req.legs[0].position_intent == PositionIntent.SELL_TO_OPEN
+              and req.legs[1].position_intent == PositionIntent.BUY_TO_OPEN and sk - lk == step, f"{sk}/{lk}")
+        check("B1 (B) short below POC and band, both lowered 5%", sk < cap,
+              f"short {sk} cap {cap:.2f} poc {sig['poc']:.2f} lower {sig['lower']:.2f}")
+        check("B1 short is the highest such strike", sk + step >= cap)
+        check("B1 (D) nearest expiration 30-60 DTE, weekly allowed", 30 <= (exp - ENTRY_DAY).days <= 60
+              and exp.weekday() == 4 and (exp - ENTRY_DAY).days < 37, str(exp))
         check("B1 limit = mid credit >= 0.50", abs(-req.limit_price - st["limit_credit"]) < 1e-9 and st["limit_credit"] >= 0.5)
 
         # entry fills -> open + resting GTC take-profit at 50%
@@ -333,9 +342,9 @@ with tempfile.TemporaryDirectory() as tmp:
     check("B8 no cross -> no signal, no order", not signals() and not f.submitted)
 
 with tempfile.TemporaryDirectory() as tmp:
-    f = signal_then_enter(tmp, earnings="2026-11-04")
+    f = signal_then_enter(tmp, earnings="2026-10-27")
     sg = signals()
-    check("B9 earnings before every 45-90 DTE monthly -> skipped with reason",
+    check("B9 earnings before every 30-60 DTE expiration -> skipped with reason",
           not f.submitted and sg[-1]["outcome"] == "skipped" and "earnings" in sg[-1]["reason"], sg[-1]["reason"])
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -402,6 +411,27 @@ r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "bb_pu
                     "--enter", "--ignore-earnings"], capture_output=True, text=True,
                    env={**os.environ, "ALPACA_API_KEY": "x", "ALPACA_SECRET_KEY": "y"})
 check("B18 --ignore-earnings refused without --dry-run", r.returncode == 1 and "only runs with --dry-run" in r.stdout, r.stdout.strip())
+
+with tempfile.TemporaryDirectory() as tmp:
+    # the original rules are still one switch away
+    saved = (bot.ENTRY_SIGNAL, bot.STRIKE_OFFSET, bot.DTE_MIN, bot.DTE_MAX, bot.MONTHLY_ONLY)
+    bot.ENTRY_SIGNAL, bot.STRIKE_OFFSET, bot.DTE_MIN, bot.DTE_MAX, bot.MONTHLY_ONLY = "cross_below", 0.0, 45, 90, True
+    f = signal_then_enter(tmp, crash="below")
+    ok = bool(f.submitted)
+    if ok:
+        req = f.submitted[0]
+        sk = int(req.legs[0].symbol[10:]) / 1000
+        exp = datetime.strptime(req.legs[0].symbol[3:9], "%y%m%d").date()
+        ok = exp == monthly(exp.year, exp.month) and 45 <= (exp - ENTRY_DAY).days <= 90 and sk == 150
+    check("B19 original rules (cross below, no offset, 45-90 DTE monthlies) still work", ok,
+          signals()[-1]["reason"] if signals() else "")
+    bot.ENTRY_SIGNAL, bot.STRIKE_OFFSET, bot.DTE_MIN, bot.DTE_MAX, bot.MONTHLY_ONLY = saved
+
+with tempfile.TemporaryDirectory() as tmp:
+    TODAY = SIGNAL_DAY
+    f = Fake(make_bars(SIGNAL_DAY, "below")); install(f, tmp)
+    run("--signal")
+    check("B20 variant A ignores a first close below the band (no signal recorded)", signals() == [])
 
 print(f"\n{failures} failure(s)")
 sys.exit(1 if failures else 0)
