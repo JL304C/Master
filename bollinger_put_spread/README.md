@@ -60,6 +60,9 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
    - `python bb_put_spread_bot.py --signal --dry-run`
    - `python bb_put_spread_bot.py --enter --dry-run --force-entry AMD` runs the whole entry process for AMD today, as if
      it had signalled, and logs the strikes and credit it would use. It submits nothing and saves no state.
+   - Add `--ignore-earnings` to that command to switch the earnings filter off, so you can see the strikes and credit
+     even when earnings block every expiration. The bot refuses this flag without `--dry-run`, and the log line is
+     marked `[TEST: earnings ignored]`.
 5. Schedule the three commands above, with "Start in" set to the folder.
 
 ## Data notes
@@ -77,7 +80,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 56 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 58 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;
@@ -85,6 +88,6 @@ Alpha Vantage data through:
 - a stop, which cancels the take-profit first, then the close fill and the P&L row;
 - take profit, a resting take-profit fill, and the time stop;
 - skips for earnings, an Alpha Vantage failure, low credit, a stale signal, an unfilled entry and the per-ticker limit;
-- dry run and `--force-entry`.
+- dry run, `--force-entry`, and `--ignore-earnings` (including its refusal without `--dry-run`).
 
 All pass, and every order passes alpaca-py's own request validation.

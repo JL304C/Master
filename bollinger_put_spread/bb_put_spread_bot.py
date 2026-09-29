@@ -35,6 +35,9 @@ Usage (Windows Task Scheduler, weekdays):
 Add --dry-run to decide and log without submitting orders or saving state.
   python bb_put_spread_bot.py --enter --dry-run --force-entry AMD
     runs the full entry pipeline for AMD today as if it had signalled (dry run only).
+  python bb_put_spread_bot.py --enter --dry-run --force-entry AMD --ignore-earnings
+    same, with the earnings filter switched off, to see the strikes and credit it would
+    pick (test only; refused without --dry-run).
 
 Requires: pip install alpaca-py
 Credentials: ALPACA_API_KEY / ALPACA_SECRET_KEY / ALPHAVANTAGE_API_KEY env vars or a
@@ -101,6 +104,12 @@ TRADES_CSV = HERE / "bb_trades.csv"
 EARNINGS_CACHE = HERE / "bb_earnings_cache.json"
 
 DRY_RUN = "--dry-run" in sys.argv
+# Test-only: skip the earnings filter to see which strikes/credit the bot would pick.
+# Refused without --dry-run, so it can never affect a real order.
+IGNORE_EARNINGS = "--ignore-earnings" in sys.argv
+if IGNORE_EARNINGS and not DRY_RUN:
+    print("--ignore-earnings only runs with --dry-run")
+    sys.exit(1)
 
 
 def load_env_file(path: Path) -> None:
@@ -484,7 +493,11 @@ def enter_one(state: dict, sig: dict) -> None:
     if why:
         record_signal(sig, "skipped", why)
         return
-    ok, earn, note = next_earnings(ticker)
+    if IGNORE_EARNINGS:
+        ok, earn, note = True, None, "ignored (--ignore-earnings test flag)"
+        log({"action": "test_flag", "reason": "--ignore-earnings: earnings filter OFF for this dry run"})
+    else:
+        ok, earn, note = next_earnings(ticker)
     if not ok:
         record_signal(sig, "skipped", f"no earnings date ({note}) -- can't prove the expiry is earnings-free")
         return
@@ -527,7 +540,7 @@ def enter_one(state: dict, sig: dict) -> None:
         "short_symbol": short_sym, "long_symbol": long_sym, "short_strike": short_k, "long_strike": long_k,
         "qty": QTY, "limit_credit": credit, "entry_credit": None, "entry_order_id": oid,
         "status": "opening", "tp_order_id": None, "close_order_id": None, "signal": sig})
-    record_signal(sig, "order_placed", f"earnings {earn}; {ticker} {exp} {short_k}/{long_k}P "
+    record_signal(sig, "order_placed", f"{'[TEST: earnings ignored] ' if IGNORE_EARNINGS else ''}earnings {earn}; {ticker} {exp} {short_k}/{long_k}P "
                                        f"mid credit {credit:.2f} x{QTY}", order_id=oid, **detail)
 
 

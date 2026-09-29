@@ -376,5 +376,23 @@ with tempfile.TemporaryDirectory() as tmp:
     check("B16 --force-entry dry run walks the entry path", not f.submitted and signals()[-1]["outcome"] in ("order_placed", "skipped"),
           signals()[-1]["reason"])
 
+with tempfile.TemporaryDirectory() as tmp:
+    # --ignore-earnings: earnings on Nov 4 would block every expiry; the flag lets the dry run pick strikes
+    TODAY = ENTRY_DAY
+    f = Fake(make_bars(SIGNAL_DAY, True)); install(f, tmp, earnings="2026-11-04")
+    bot.IGNORE_EARNINGS = True
+    run("--enter", "--dry-run", "--force-entry", "AMD", "--ignore-earnings")
+    bot.IGNORE_EARNINGS = False
+    sg = signals()
+    check("B17 --ignore-earnings dry run picks strikes past earnings, submits nothing",
+          not f.submitted and sg[-1]["outcome"] == "order_placed" and sg[-1]["reason"].startswith("[TEST")
+          and sg[-1]["short_strike"], sg[-1]["reason"])
+
+import subprocess
+r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "bb_put_spread_bot.py"),
+                    "--enter", "--ignore-earnings"], capture_output=True, text=True,
+                   env={**os.environ, "ALPACA_API_KEY": "x", "ALPACA_SECRET_KEY": "y"})
+check("B18 --ignore-earnings refused without --dry-run", r.returncode == 1 and "only runs with --dry-run" in r.stdout, r.stdout.strip())
+
 print(f"\n{failures} failure(s)")
 sys.exit(1 if failures else 0)
