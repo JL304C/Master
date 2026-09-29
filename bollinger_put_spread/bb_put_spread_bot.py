@@ -15,7 +15,7 @@ Rules (bb_rules.py holds the pure logic):
     Expiration: standard monthly (3rd Friday), 45-90 DTE, expiring before the next
     earnings date (Alpha Vantage EARNINGS_CALENDAR); nearest one wins; none -> skip.
     Short put = highest listed strike below BOTH the POC and the lower band;
-    long put = short - $5. One multi-leg DAY limit order at the mid credit, 1 contract.
+    long put = the listed strike nearest (short - 1% of the price), at least one strike down. One multi-leg DAY limit order at the mid credit, 1 contract.
     Skip if the mid credit < $0.50. Max 5 open spreads, 2 per sector, 1 per ticker.
     Optionally leaves a resting GTC buy-to-close at 50% of the credit once filled.
   EXITS   (run ~3:45 PM ET, --manage), using mid prices:
@@ -191,9 +191,9 @@ def append_csv(path: Path, header: list[str], row: dict) -> None:
 
 SIGNAL_FIELDS = ["logged_at", "dry_run", "signal_date", "ticker", "sector", "close", "lower_band",
                  "sma", "poc", "outcome", "reason", "expiration", "short_strike", "long_strike",
-                 "mid_credit", "order_id"]
+                 "width", "mid_credit", "order_id"]
 TRADE_FIELDS = ["ticker", "sector", "signal_date", "entry_date", "exit_date", "expiration",
-                "short_strike", "long_strike", "qty", "entry_credit", "exit_price", "pnl",
+                "short_strike", "long_strike", "width", "qty", "entry_credit", "exit_price", "pnl",
                 "exit_reason", "entry_order_id", "exit_order_id"]
 
 
@@ -511,16 +511,18 @@ def enter_one(state: dict, sig: dict) -> None:
         return
     exp = exps[0]
     by_strike = {float(c.strike_price): c.symbol for c in contracts if as_date(c.expiration_date) == exp}
-    picked = rules.pick_strikes(sorted(by_strike), sig["poc"], sig["lower"])
+    width_goal = rules.target_width(sig["close"])
+    picked = rules.pick_strikes(sorted(by_strike), sig["poc"], sig["lower"], width_goal)
     if picked is None:
         ceiling = min(sig["poc"], sig["lower"])
         near = [k for k in sorted(by_strike) if ceiling - 40 <= k <= ceiling + 10]
-        record_signal(sig, "skipped", f"no listed short/long pair ${rules.SPREAD_WIDTH:.0f} apart below "
+        record_signal(sig, "skipped", f"no listed short/long pair below "
                                       f"min(POC {sig['poc']:.2f}, lower band {sig['lower']:.2f}) for {exp}; "
                                       f"listed strikes near there: {near or 'none'} "
                                       f"({len(by_strike)} puts listed for {exp})", expiration=exp.isoformat())
         return
     short_k, long_k = picked
+    width = round(short_k - long_k, 2)
     short_sym, long_sym = by_strike[short_k], by_strike[long_k]
     q = mids([short_sym, long_sym])
     if short_sym not in q or long_sym not in q:
@@ -528,7 +530,8 @@ def enter_one(state: dict, sig: dict) -> None:
                       short_strike=short_k, long_strike=long_k)
         return
     credit = round(q[short_sym]["mid"] - q[long_sym]["mid"], 2)
-    detail = dict(expiration=exp.isoformat(), short_strike=short_k, long_strike=long_k, mid_credit=credit)
+    detail = dict(expiration=exp.isoformat(), short_strike=short_k, long_strike=long_k, mid_credit=credit,
+                  width=width)
     if credit < MIN_CREDIT:
         record_signal(sig, "skipped", f"mid credit {credit:.2f} < {MIN_CREDIT:.2f}", **detail)
         return
@@ -542,10 +545,12 @@ def enter_one(state: dict, sig: dict) -> None:
         "ticker": ticker, "sector": sig["sector"], "signal_date": sig["signal_date"],
         "entry_date": today.isoformat(), "expiration": exp.isoformat(),
         "short_symbol": short_sym, "long_symbol": long_sym, "short_strike": short_k, "long_strike": long_k,
-        "qty": QTY, "limit_credit": credit, "entry_credit": None, "entry_order_id": oid,
+        "width": width, "qty": QTY, "limit_credit": credit, "entry_credit": None, "entry_order_id": oid,
         "status": "opening", "tp_order_id": None, "close_order_id": None, "signal": sig})
     record_signal(sig, "order_placed", f"{'[TEST: earnings ignored] ' if IGNORE_EARNINGS else ''}earnings {earn}; {ticker} {exp} {short_k}/{long_k}P "
-                                       f"mid credit {credit:.2f} x{QTY}", order_id=oid, **detail)
+                                       f"(${width:g} wide, target {rules.WIDTH_PCT:.0%} of {sig['close']:.2f} = "
+                                       f"${width_goal:.2f}); mid credit {credit:.2f} x{QTY}; "
+                                       f"max loss ${(width - credit) * 100 * QTY:,.0f}", order_id=oid, **detail)
 
 
 def run_manage(state: dict) -> None:
@@ -578,7 +583,7 @@ def run_manage(state: dict) -> None:
         if value is not None:
             limit = max(0.01, round(q[sp["short_symbol"]]["ask"] - q[sp["long_symbol"]]["bid"], 2))
         else:
-            limit = round(rules.SPREAD_WIDTH, 2)          # no quotes: cap at the max value of the spread
+            limit = round(sp["short_strike"] - sp["long_strike"], 2)   # no quotes: cap at the spread's max value
         try:
             oid = submit_spread([(sp["short_symbol"], PositionIntent.BUY_TO_CLOSE),
                                  (sp["long_symbol"], PositionIntent.SELL_TO_CLOSE)],

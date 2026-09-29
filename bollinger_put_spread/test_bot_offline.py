@@ -46,9 +46,18 @@ poc = rules.volume_profile_poc(prof, lookback=6, nbins=10)
 check("POC lands in the heavy 14-15 bin", 14 <= poc <= 15, f"{poc:.2f}")
 
 listed = [100, 105, 110, 115, 120]
-check("strikes: highest below both POC and band", rules.pick_strikes(listed, 118, 112) == (110, 105))
-check("strikes: strictly below (a strike AT the band is not taken)", rules.pick_strikes(listed, 130, 115) == (110, 105))
-check("strikes: missing long leg -> None", rules.pick_strikes([100, 110], 118, 112) is None)
+check("strikes: highest below both POC and band", rules.pick_strikes(listed, 118, 112, 5) == (110, 105))
+check("strikes: strictly below (a strike AT the band is not taken)", rules.pick_strikes(listed, 130, 115, 5) == (110, 105))
+check("strikes: nothing below the short -> None", rules.pick_strikes([110, 120], 118, 112, 5) is None)
+check("width: 1% of price", abs(rules.target_width(607.87) - 6.0787) < 1e-9)
+amd = [370.0, 380.0, 390.0, 400.0, 410.0]         # AMD Nov-20 puts from the real dry run
+check("width: $10-step chain -> next strike down (AMD 400/390)",
+      rules.pick_strikes(amd, 511.85, 407.41, rules.target_width(607.87)) == (400, 390))
+fine = [390, 392.5, 395, 397.5, 400, 402.5, 405, 407.5, 410]
+check("width: $2.50-step chain -> strike nearest short-6.08 (405/400)",
+      rules.pick_strikes(fine, 511.85, 407.41, 6.08) == (405, 400))
+check("width: tie goes to the narrower spread", rules.pick_strikes([90, 95, 100, 110], 200, 111, 7.5) == (110, 100))
+check("width: scales up on a pricier stock", rules.pick_strikes(list(range(800, 1001, 5)), 2000, 951, 20) == (950, 930))
 
 check("3rd Friday Nov 2026 = Nov 20", rules.third_friday(2026, 11) == date(2026, 11, 20))
 # Good Friday 2027-04-16 is the 3rd Friday -> Thursday 04-15 is the monthly

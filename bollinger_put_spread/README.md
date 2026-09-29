@@ -1,6 +1,6 @@
 # Bollinger Oversold Put Credit Spreads (Alpaca paper trading)
 
-This bot sells a $5-wide put credit spread when a stock closes below its lower Bollinger band. It works like the NVDA
+This bot sells a put credit spread about 1% of the stock price wide when a stock closes below its lower Bollinger band. It works like the NVDA
 delayed iron condor bot: it trades the same **Alpaca paper account**, `paper=True` is hard-coded, it logs every decision,
 and it has a `--dry-run` mode. It only touches option contracts it opened itself, which it records in `bb_state.json`.
 That means it can share the account with the condor bot and the other bots.
@@ -17,7 +17,7 @@ Treat the paper results as the first test.
 | Order timing | The order goes in the next trading morning. A signal that isn't acted on that morning is logged as stale and skipped. |
 | POC | Uses the last 126 daily bars. Each bar's volume is spread evenly across its high–low range, split into 100 equal price bins. The POC is the middle of the bin with the most volume. |
 | Short put | The highest listed strike strictly below both the POC and the lower band, both taken from the signal day. |
-| Long put | The short strike minus $5. That strike must be listed, or the trade is skipped. |
+| Long put | The target width is 1% of the signal-day close (`WIDTH_PCT` in `bb_rules.py`), e.g. $6.08 on AMD at $607.87. The long put is the listed strike below the short that is closest to short − target; on a tie the narrower spread wins. When strikes are spaced wider than the target, it is simply the next strike down, e.g. AMD 400/390 in $10 steps. The width actually used and the maximum loss are logged. |
 | Expiration | A standard monthly (3rd Friday, or the Thursday before when that Friday is a holiday) 45–90 DTE out. It must expire before the next earnings date from Alpha Vantage `EARNINGS_CALENDAR`. If several qualify, the nearest one is used. If none qualify, the trade is skipped. |
 | Order | One multi-leg DAY limit order at the mid credit for 1 contract. It is skipped if the mid credit is under $0.50. |
 | Limits | At most 5 open spreads in total, 2 per sector, and 1 per ticker. |
@@ -80,7 +80,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 58 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 63 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;

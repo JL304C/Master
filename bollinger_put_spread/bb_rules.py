@@ -16,7 +16,7 @@ BB_PERIOD = 50           # 50-day SMA
 BB_STD = 2.0             # 2 standard deviations
 POC_LOOKBACK = 126       # ~6 months of daily bars
 POC_BINS = 100           # price bins across the 6-month high-low range
-SPREAD_WIDTH = 5.0       # long put = short strike - $5
+WIDTH_PCT = 0.01         # target spread width = 1% of the underlying price
 TAKE_PROFIT_FRAC = 0.50  # close when spread value <= 50% of entry credit
 STOP_MULT = 2.0          # close when spread value >= 2x entry credit
 TIME_STOP_DTE = 21       # close at 21 DTE
@@ -83,18 +83,27 @@ def volume_profile_poc(bars: list[dict], lookback: int = POC_LOOKBACK, nbins: in
     return lo + (j + 0.5) * size
 
 
+def target_width(price: float, pct: float = WIDTH_PCT) -> float:
+    """Spread width as a share of the underlying price: 1% -> $6.08 on a $607.87 stock."""
+    return price * pct
+
+
 def pick_strikes(listed: list[float], poc: float, lower_band: float,
-                 width: float = SPREAD_WIDTH) -> tuple[float, float] | None:
-    """Short put = highest listed strike strictly below BOTH the POC and the lower band;
-    long put = short - width, which must also be listed. None if either is missing."""
+                 width: float) -> tuple[float, float] | None:
+    """Short put = highest listed strike strictly below BOTH the POC and the lower band.
+    Long put = the listed strike below the short that is closest to (short - width); on a
+    tie the narrower spread wins. So when strikes are spaced wider than `width`, the long
+    is simply the next strike down. None if there is no short or no strike below it."""
     ceiling = min(poc, lower_band)
     below = [k for k in listed if k < ceiling - 1e-9]
     if not below:
         return None
     short = max(below)
-    long = short - width
-    if not any(abs(k - long) < 0.001 for k in listed):
+    lower = [k for k in listed if k < short - 1e-9]
+    if not lower:
         return None
+    goal = short - width
+    long = min(lower, key=lambda k: (abs(k - goal), short - k))
     return short, long
 
 
