@@ -91,3 +91,26 @@ Alpha Vantage data through:
 - dry run, `--force-entry`, and `--ignore-earnings` (including its refusal without `--dry-run`).
 
 All pass, and every order passes alpaca-py's own request validation.
+
+## Stock-side backtest (`bb_stock_backtest.py`)
+
+Replays the bot's own rules (`bb_rules.py`) on free daily bars, from Alpaca's SIP feed since 2016. It uses AMD's real
+earnings dates from Alpha Vantage `EARNINGS` and `EARNINGS_CALENDAR`, which costs 2 requests, cached for the day.
+
+Run: `python bb_stock_backtest.py` (options: `--symbol AMD --start 2016-01-01`). It uses the same `.env` as the bot and
+writes `bb_backtest_trades.csv`.
+
+- **Stock-side, no option prices:**
+  - how often the signal fires;
+  - how many signals survive the earnings, expiration and one-per-ticker rules;
+  - how far below the entry price the short strike sits;
+  - how often the stock closed below the short strike before the 21 DTE time stop.
+- **Model P&L:** the spread is priced with Black-Scholes (IV = 20-day realized vol × 0.8 / 1.0 / 1.2, plus a put skew),
+  and the $0.50 minimum credit and all four exits are applied. It is a model: on the NVDA condor the same kind of
+  model overstated real credits by about 80%. Real prices need Databento OPRA.
+- **Baseline:** the same rules entered whenever flat, with the short strike the same distance below the price. This
+  shows whether the signal adds anything.
+- **Approximations:**
+  - Listed strikes are approximated. The spacing is $2.50 under $100, $5 under $300 and $10 above.
+  - Exits are checked at each day's close; the resting take-profit is assumed to fill at exactly 50%.
+  - Stop and time exits pay the mid plus $0.10.
