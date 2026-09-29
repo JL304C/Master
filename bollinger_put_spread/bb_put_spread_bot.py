@@ -513,8 +513,12 @@ def enter_one(state: dict, sig: dict) -> None:
     by_strike = {float(c.strike_price): c.symbol for c in contracts if as_date(c.expiration_date) == exp}
     picked = rules.pick_strikes(sorted(by_strike), sig["poc"], sig["lower"])
     if picked is None:
-        record_signal(sig, "skipped", f"no listed short/long pair below min(POC {sig['poc']:.2f}, "
-                                      f"lower band {sig['lower']:.2f}) for {exp}", expiration=exp.isoformat())
+        ceiling = min(sig["poc"], sig["lower"])
+        near = [k for k in sorted(by_strike) if ceiling - 40 <= k <= ceiling + 10]
+        record_signal(sig, "skipped", f"no listed short/long pair ${rules.SPREAD_WIDTH:.0f} apart below "
+                                      f"min(POC {sig['poc']:.2f}, lower band {sig['lower']:.2f}) for {exp}; "
+                                      f"listed strikes near there: {near or 'none'} "
+                                      f"({len(by_strike)} puts listed for {exp})", expiration=exp.isoformat())
         return
     short_k, long_k = picked
     short_sym, long_sym = by_strike[short_k], by_strike[long_k]
