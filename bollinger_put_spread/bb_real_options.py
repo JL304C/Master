@@ -388,7 +388,7 @@ def row(label, trades, width=10):
     if not s:
         return f"{label:<{width}}{'no closed trades':>20}"
     credits = [t["credit"] for t in trades if t.get("pnl") is not None]
-    return (f"{label:<{width}}{s['n']:>7}{s['win']:>6.0%}{s['total']:>10,.0f}{s['avg']:>7,.0f}{s['worst']:>8,.0f}"
+    return (f"{label[:width]:<{width}}{s['n']:>7}{s['win']:>6.0%}{s['total']:>10,.0f}{s['avg']:>7,.0f}{s['worst']:>8,.0f}"
             f"{s['dd']:>9,.0f}{s['t']:>6.1f}{statistics.mean(credits):>8.2f}{m['total']:>13,.0f}")
 
 
@@ -443,12 +443,17 @@ def main():
         print("Cancelled, nothing downloaded.")
         return
 
-    print("Replaying with real quotes -- a line prints per closed trade.")
+    print("Replaying with real quotes -- a line prints per closed trade, and a summary row after each ticker.")
+    print("(Tip: don't click inside the PowerShell window while it runs -- that pauses the program until you press Enter.)")
     results = {}
     for tk, (bars, raw, earn) in data.items():
         for mode in modes:
+            print(f"--- {tk} {mode} ---", flush=True)
             try:
-                results[(tk, mode)] = replay(tk, bars, raw, earn, mode, quotes, first_day, print)
+                results[(tk, mode)] = replay(tk, bars, raw, earn, mode, quotes, first_day,
+                                             lambda msg: print(msg, flush=True))
+                print(HEADER.replace("          ", f"{'':<10}", 1))
+                print(row(f"{tk} {mode[:4]}", results[(tk, mode)][0]), flush=True)
             except Exception as exc:                      # noqa: BLE001
                 print(f"  {tk} {mode}: FAILED -- {exc}")
 
