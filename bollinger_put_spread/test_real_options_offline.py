@@ -142,6 +142,11 @@ for mode in ("signal", "baseline"):
     straddle = [t for t in trades if t.get("status") and t["entry"] < date(2020, 8, 31) <= (t.get("exit") or t["entry"])]
     check(f"{mode}: no trade held across the split", not straddle, str(straddle[:1]))
 
+check("META options are FB before 2022-06-09", ro.option_root("META", date(2021, 1, 4)) == "FB"
+      and ro.option_root("META", date(2022, 6, 9)) == "META" and ro.option_root("AMD", date(2016, 1, 4)) == "AMD")
+check("a META trade across the rename is detected", ro.root_changes_between("META", date(2022, 5, 20), date(2022, 6, 24))
+      and not ro.root_changes_between("META", date(2022, 6, 10), date(2022, 7, 22)))
+
 print(ro.row("POOLED", closed))
 print(f"\n{failures} failure(s)")
 raise SystemExit(1 if failures else 0)

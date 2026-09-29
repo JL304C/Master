@@ -119,20 +119,39 @@ def parse_window_df(df, at: time = CHECK_TIME) -> dict:
     return out
 
 
+# Option roots that changed: before the date, the options traded under the old root.
+ROOT_CHANGES = {"META": [(date(2022, 6, 9), "FB")]}
+
+
+def option_root(ticker: str, d: date) -> str:
+    for changed_on, old in ROOT_CHANGES.get(ticker, []):
+        if d < changed_on:
+            return old
+    return ticker
+
+
+def root_changes_between(ticker: str, d0: date, d1: date) -> bool:
+    return any(d0 < changed_on <= d1 for changed_on, _ in ROOT_CHANGES.get(ticker, []))
+
+
 class DatabentoQuotes:
     def __init__(self, client):
         self.client = client
         CACHE.mkdir(exist_ok=True)
 
     def _chain_path(self, ticker, d):
-        return CACHE / f"{ticker}_puts_{d.isoformat()}_{ENTRY_TIME:%H%M}.dbn.zst"
+        return CACHE / f"{option_root(ticker, d)}_puts_{d.isoformat()}_{ENTRY_TIME:%H%M}.dbn.zst"
 
     def chain_cost(self, ticker, d) -> float:
         if self._chain_path(ticker, d).exists():
             return 0.0
         s, e = et_window(d, ENTRY_TIME)
-        return self.client.metadata.get_cost(dataset=DATASET, symbols=[f"{ticker}.OPT"], schema=SCHEMA,
-                                             stype_in="parent", start=s, end=e)
+        try:
+            return self.client.metadata.get_cost(dataset=DATASET, symbols=[f"{option_root(ticker, d)}.OPT"],
+                                                 schema=SCHEMA, stype_in="parent", start=s, end=e)
+        except Exception as exc:                          # noqa: BLE001 -- estimate only
+            print(f"    (no cost estimate for {ticker} on {d}: {str(exc).splitlines()[0]})")
+            return 0.0
 
     def _load(self, path, **req):
         import databento as db
@@ -144,15 +163,23 @@ class DatabentoQuotes:
 
     def chain(self, ticker, d) -> dict:
         s, e = et_window(d, ENTRY_TIME)
-        return parse_chain_df(self._load(self._chain_path(ticker, d), symbols=[f"{ticker}.OPT"],
-                                         stype_in="parent", start=s, end=e))
+        try:
+            return parse_chain_df(self._load(self._chain_path(ticker, d), symbols=[f"{option_root(ticker, d)}.OPT"],
+                                             stype_in="parent", start=s, end=e))
+        except Exception as exc:                          # noqa: BLE001 -- that morning counts as "no quotes"
+            print(f"  {ticker} {d}: no option data ({str(exc).splitlines()[0]})")
+            return {}
 
     def window(self, symbols, d0, d1) -> dict:
         key = hashlib.sha1(f"{sorted(symbols)}|{d0}|{d1}".encode()).hexdigest()[:16]
         path = CACHE / f"window_{key}.dbn.zst"
         s = et_window(d0, time(9, 30), 0, 0)[0]
         e = et_window(d1, time(16, 0), 0, 0)[0]
-        return parse_window_df(self._load(path, symbols=list(symbols), stype_in="raw_symbol", start=s, end=e))
+        try:
+            return parse_window_df(self._load(path, symbols=list(symbols), stype_in="raw_symbol", start=s, end=e))
+        except Exception as exc:                          # noqa: BLE001
+            print(f"  {symbols} {d0}..{d1}: no option data ({str(exc).splitlines()[0]})")
+            return None
 
 
 # --------------------------------------------------------------------------- #
@@ -286,7 +313,15 @@ def replay(ticker, bars, raw, earnings, mode, quotes, first_day, log):
             skip("stock split during the trade")
             busy_until = end
             continue
+        if root_changes_between(ticker, ed, bars[end]["d"]):
+            skip("option symbol changed during the trade")
+            busy_until = end
+            continue
         daily = quotes.window([sym_s, sym_l], ed, bars[end]["d"])
+        if daily is None:
+            skip("no quotes during the trade")
+            busy_until = end
+            continue
         exit_j = reason = None
         last_q = None
         for j in range(e, end + 1):
