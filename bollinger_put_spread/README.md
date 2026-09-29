@@ -144,3 +144,25 @@ Several tickers in one run: `python bb_stock_backtest.py --symbols AMD,MSFT,GOOG
   - Listed strikes are approximated. The spacing is $2.50 under $100, $5 under $300 and $10 above.
   - Exits are checked at each day's close; the resting take-profit is assumed to fill at exactly 50%.
   - Stop and time exits pay the mid plus $0.10.
+
+## Real option prices (`bb_real_options.py`, Databento OPRA)
+
+This replays the bot's current rules (A+B) with **real bid/ask quotes**, next to a no-signal baseline. The baseline
+enters on the last trading day of each week when flat, with the short strike about 8.4% below the close.
+
+- **Entries:** the real listed chain at 9:45 AM the morning after the signal decides the expiration, the strikes and the
+  mid credit. The fill is assumed at the mid, which is the bot's limit price.
+- **Exits:** checked each day with the real 3:45 PM quotes, using the bot's exit rules. Each exit pays the natural price,
+  like the bot's closing order. `total@mid` shows the optimistic case where exits fill at the mid.
+- **Data used:**
+  - Alpaca daily bars: split-adjusted for the signal, raw for strikes.
+  - Earnings: the backtest's cached Alpha Vantage files.
+  - Databento `OPRA.PILLAR` `cbbo-1m`: the whole put chain for 3 minutes on each entry morning, plus the two
+    contracts over each trade's life.
+  - Mornings the earnings rule already blocks are never downloaded. A trade that spans a stock split is skipped.
+- **Cost:** it prints Databento's cost estimate and waits for `y`. Downloads are cached in `opra_cache/`, so re-runs
+  are free.
+- **Setup:** `pip install databento pandas`, then add `DATABENTO_API_KEY` to `.env`.
+- **Run:** `python bb_real_options.py` (options: `--tickers AMD,MSFT`, `--only signal|baseline`, `--start 2016-01-01`).
+  It writes `bb_real_option_trades.csv`.
+- **Offline test:** `python test_real_options_offline.py`, with no network and no keys.

@@ -1,1 +1,3 @@
 alpaca-py
+databento   # only for bb_real_options.py
+pandas      # only for bb_real_options.py
