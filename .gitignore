@@ -9,3 +9,5 @@ bollinger_put_spread/bb_log.jsonl
 bollinger_put_spread/bb_signals.csv
 bollinger_put_spread/bb_trades.csv
 bollinger_put_spread/bb_earnings_cache.json
+bollinger_put_spread/bb_backtest_trades.csv
+bollinger_put_spread/bb_backtest_earnings_*.json
