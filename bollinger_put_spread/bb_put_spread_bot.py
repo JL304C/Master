@@ -104,24 +104,40 @@ DRY_RUN = "--dry-run" in sys.argv
 
 
 def load_env_file(path: Path) -> None:
-    """Minimal .env loader so this script has no extra dependency for it."""
+    """Minimal .env loader so this script has no extra dependency for it. Tolerates what
+    Windows editors produce: a UTF-8 BOM, UTF-16 (PowerShell 5 redirection), quotes,
+    'export ' prefixes and spaces around '='."""
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
-        line = line.strip()
+    raw = path.read_bytes()
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        text = raw.decode("utf-16")
+    else:
+        text = raw.decode("utf-8-sig", errors="replace")
+    for line in text.splitlines():
+        line = line.strip().lstrip("﻿")
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
-        os.environ.setdefault(k.strip(), v.strip())
+        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-load_env_file(HERE / ".env")
+ENV_CANDIDATES = [HERE / ".env", HERE / ".env.txt", HERE / "env.txt", HERE / "env"]
+for _p in ENV_CANDIDATES:                  # Notepad often saves ".env" as ".env.txt"
+    load_env_file(_p)
 
 API_KEY = os.environ.get("ALPACA_API_KEY")
 SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY")
 AV_KEY = os.environ.get("ALPHAVANTAGE_API_KEY")
 if not API_KEY or not SECRET_KEY:
+    found = [p.name for p in ENV_CANDIDATES if p.exists()]
     print("Missing ALPACA_API_KEY / ALPACA_SECRET_KEY (env var or .env file next to this script).")
+    print(f"  Looked in: {HERE}")
+    print(f"  Env files found there: {found or 'none'}")
+    print(f"  Files in that folder: {sorted(p.name for p in HERE.iterdir())}")
+    print("  The file must contain lines exactly like:  ALPACA_API_KEY=PK...")
     sys.exit(1)
 
 # paper=True is hard-coded here on purpose -- this script is not the place a
