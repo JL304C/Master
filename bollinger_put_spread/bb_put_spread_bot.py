@@ -7,7 +7,7 @@ itself (recorded in bb_state.json), so it can share the paper account with the c
 bot and the other bots.
 
 Rules (bb_rules.py holds the pure logic):
-  Current settings = backtest variant A+B+D (see README); the original rules are one
+  Current settings = backtest variant A+B (see README); the original rules are one
   config switch away (ENTRY_SIGNAL, STRIKE_OFFSET, DTE_MIN/DTE_MAX, MONTHLY_ONLY).
   SIGNAL  (run after the close, --signal)
     Daily closes, Bollinger 50-day SMA +/- 2 sd.
@@ -15,7 +15,7 @@ Rules (bb_rules.py holds the pure logic):
         yesterday's close below it.   ("cross_below": today's close crosses below it.)
     The signal, the band and the 6-month volume-profile POC are saved for the next morning.
   ENTRY   (run the next trading morning, --enter)
-    Expiration: D -- 30-60 DTE, weeklies allowed (MONTHLY_ONLY=False), expiring before the
+    Expiration: standard monthly (3rd Friday) 45-90 DTE (MONTHLY_ONLY), expiring before the
     next earnings date (Alpha Vantage EARNINGS_CALENDAR); nearest one wins; none -> skip.
     Short put: B -- highest listed strike below BOTH the POC and the lower band, each
     lowered by STRIKE_OFFSET (5%).
@@ -88,19 +88,31 @@ import bb_rules as rules
 # Configuration
 # --------------------------------------------------------------------------- #
 # ticker -> sector (sector drives the max-2-per-sector rule). Add tickers here.
+# Chosen from the 11-ticker backtest (2026-09-29). Left out: NVDA (the NVDA bull call spread
+# bot treats every NVDA option on the account as its own), XOM and JPM (credits rarely
+# reached $0.50). Max 2 per sector still applies.
 WATCHLIST = {
     "AMD": "Technology",
+    "MSFT": "Technology",
+    "GOOGL": "Communication",
+    "META": "Communication",
+    "AMZN": "Consumer Discretionary",
+    "UNH": "Health Care",
+    "CAT": "Industrials",
+    "COST": "Consumer Staples",
+    "SPY": "Index ETF",           # no earnings -> no earnings filter
 }
 QTY = 1                       # contracts per trade
 MAX_OPEN_TOTAL = 5
 MAX_PER_SECTOR = 2
 MAX_PER_TICKER = 1
 MIN_CREDIT = 0.50             # skip if the mid credit is below this
-# Backtest variant A+B+D (bb_stock_backtest.py). Original rules: "cross_below", 0.0, 45, 90, True.
+# Backtest variant A+B (bb_stock_backtest.py, best signal variant over 11 tickers).
+# Original rules: "cross_below", 0.0, 45, 90, True.  Variant D (30-60 DTE, weeklies) lost money.
 ENTRY_SIGNAL = "reclaim"      # A: close back above the lower band ("cross_below" = first close below it)
 STRIKE_OFFSET = 0.05          # B: short strike below min(POC, lower band) x (1 - 5%)
-DTE_MIN, DTE_MAX = 30, 60     # D: 30-60 DTE ...
-MONTHLY_ONLY = False          # D: ... weekly expirations allowed
+DTE_MIN, DTE_MAX = 45, 90     # monthly expirations 45-90 DTE, as originally specified
+MONTHLY_ONLY = True
 RESTING_TP_ORDER = True       # leave a GTC buy-to-close at 50% of the credit after the fill
 EARNINGS_HORIZON = "6month"   # Alpha Vantage EARNINGS_CALENDAR horizon (covers 90 DTE)
 BAR_DAYS = 300                # calendar days of daily bars fetched (>= 126 trading days)

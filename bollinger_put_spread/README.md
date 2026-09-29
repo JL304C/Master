@@ -8,15 +8,22 @@ That means it can share the account with the condor bot and the other bots.
 **Not backtested yet.** The condor strategy was backtested before its bot was written. This strategy has not been.
 Treat the paper results as the first test.
 
-> **Current settings: backtest variant A+B+D** (chosen 2026-09-29 after the stock-side backtest below).
+> **Current settings: backtest variant A+B, 9 tickers** (chosen 2026-09-29 from the 11-ticker stock-side backtest).
 > - **A:** the signal is a close back *above* the lower band the day after an oversold close.
 > - **B:** the short strike is 5% below the lower of the POC and the band.
-> - **D:** expirations are 30–60 DTE, and weekly expirations are allowed.
+> - **Expirations:** standard monthlies 45–90 DTE, as originally specified. Variant D (30–60 DTE with weeklies) lost
+>   money in every combination.
+> - **Watchlist:** AMD, MSFT (Technology); GOOGL, META (Communication); AMZN; UNH; CAT; COST; SPY.
+>   - NVDA is left out because the NVDA bull call spread bot treats every NVDA option on the account as its own.
+>   - XOM and JPM are left out because their credits rarely reached $0.50.
+>   - When more signals arrive than the limits allow, the tickers earlier in `WATCHLIST` go first.
 >
-> On AMD over 2016–2026 this cut the share of trades where the stock closed below the short strike from 82% to 21%.
-> The model result is about break-even: +$48 over 11 trades, t = 0.3. So it is paper-trading only while more
-> tickers are tested. The original rules below are one switch away: `ENTRY_SIGNAL = "cross_below"`,
-> `STRIKE_OFFSET = 0.0`, `DTE_MIN, DTE_MAX = 45, 90`, `MONTHLY_ONLY = True`.
+> **Pooled model result for A+B over 11 tickers, 2016–2026:** 93 trades, 71% won, +$1,505, t = 1.7, positive at all
+> three IV levels. But the no-signal baseline, entering the same kind of spread whenever flat, made +$6,259 in the same
+> model. So the profit comes mostly from put premium and the trade management, not from the Bollinger timing. This is
+> paper-trading only until real option prices (Databento OPRA) confirm it.
+>
+> The original rules are one switch away: `ENTRY_SIGNAL = "cross_below"`, `STRIKE_OFFSET = 0.0`.
 
 ## Rules (as originally specified)
 
@@ -90,7 +97,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 61 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 64 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;

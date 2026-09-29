@@ -14,6 +14,8 @@ os.environ.setdefault("ALPHAVANTAGE_API_KEY", "test")
 sys.argv = [sys.argv[0]]
 import bb_rules as rules
 import bb_put_spread_bot as bot
+FULL_WATCHLIST = dict(bot.WATCHLIST)
+bot.WATCHLIST = {"AMD": "Technology"}      # most tests: one ticker; B21 uses the full list
 from alpaca.trading.enums import PositionIntent, TimeInForce
 
 failures = 0
@@ -273,8 +275,8 @@ with tempfile.TemporaryDirectory() as tmp:
         check("B1 (B) short below POC and band, both lowered 5%", sk < cap,
               f"short {sk} cap {cap:.2f} poc {sig['poc']:.2f} lower {sig['lower']:.2f}")
         check("B1 short is the highest such strike", sk + step >= cap)
-        check("B1 (D) nearest expiration 30-60 DTE, weekly allowed", 30 <= (exp - ENTRY_DAY).days <= 60
-              and exp.weekday() == 4 and (exp - ENTRY_DAY).days < 37, str(exp))
+        check("B1 expiration is the nearest standard monthly 45-90 DTE", exp == monthly(exp.year, exp.month)
+              and 45 <= (exp - ENTRY_DAY).days <= 90 and (exp - ENTRY_DAY).days < 76, str(exp))
         check("B1 limit = mid credit >= 0.50", abs(-req.limit_price - st["limit_credit"]) < 1e-9 and st["limit_credit"] >= 0.5)
 
         # entry fills -> open + resting GTC take-profit at 50%
@@ -344,7 +346,7 @@ with tempfile.TemporaryDirectory() as tmp:
 with tempfile.TemporaryDirectory() as tmp:
     f = signal_then_enter(tmp, earnings="2026-10-27")
     sg = signals()
-    check("B9 earnings before every 30-60 DTE expiration -> skipped with reason",
+    check("B9 earnings before every 45-90 DTE monthly -> skipped with reason",
           not f.submitted and sg[-1]["outcome"] == "skipped" and "earnings" in sg[-1]["reason"], sg[-1]["reason"])
 
 with tempfile.TemporaryDirectory() as tmp:
@@ -432,6 +434,24 @@ with tempfile.TemporaryDirectory() as tmp:
     f = Fake(make_bars(SIGNAL_DAY, "below")); install(f, tmp)
     run("--signal")
     check("B20 variant A ignores a first close below the band (no signal recorded)", signals() == [])
+
+with tempfile.TemporaryDirectory() as tmp:
+    # full watchlist, every ticker signals the same day -> limits: 2 per sector, 5 total
+    bot.WATCHLIST = FULL_WATCHLIST
+    TODAY = SIGNAL_DAY
+    f = Fake(make_bars(SIGNAL_DAY, True)); install(f, tmp)
+    run("--signal")
+    sg = signals()
+    pend = [r["ticker"] for r in sg if r["outcome"] == "pending"]
+    skipped = {r["ticker"]: r["reason"] for r in sg if r["outcome"] == "skipped"}
+    check("B21 full watchlist: first 5 in watchlist order pending (max 5)", len(pend) == 5
+          and pend == ["AMD", "MSFT", "GOOGL", "META", "AMZN"], str(pend))
+    check("B21 the rest skipped for the total cap", set(skipped) == {"UNH", "CAT", "COST", "SPY"}
+          and all("max 5" in r for r in skipped.values()), str(skipped))
+    TODAY = ENTRY_DAY
+    run("--enter")
+    check("B21 next morning: 5 orders", len(f.submitted) == 5, str(len(f.submitted)))
+    bot.WATCHLIST = {"AMD": "Technology"}
 
 print(f"\n{failures} failure(s)")
 sys.exit(1 if failures else 0)
