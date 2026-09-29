@@ -61,6 +61,7 @@ STRIKE_OFFSET = 0.05              # B
 DTE_MIN, DTE_MAX = 45, 90
 BASELINE_OTM = 0.084              # typical A+B short-strike distance in the stock-side backtest
 FEE_PER_LEG = 0.03
+DOWNLOAD_TIMEOUT = 180            # seconds; a stuck Databento download is abandoned, retried once, then skipped
 DEFAULT_TICKERS = ["AMD", "MSFT", "GOOGL", "META", "AMZN", "UNH", "CAT", "COST", "SPY"]
 
 OSI_TAIL = re.compile(r"(\d{6})([CP])(\d{8})$")
@@ -154,12 +155,51 @@ class DatabentoQuotes:
             return 0.0
 
     def _load(self, path, **req):
+        """Cached download. Writes to a .part file and renames it only when complete, so an
+        interrupted run (Ctrl+C, sleep, dropped connection) never leaves a half file that a
+        re-run would trust; a cached file that won't read is deleted and fetched again. A
+        download that takes longer than DOWNLOAD_TIMEOUT is abandoned and retried once."""
         import databento as db
-        if not path.exists():
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")               # "no data" / degraded-day notices
-                self.client.timeseries.get_range(dataset=DATASET, schema=SCHEMA, path=path, **req)
-        return db.DBNStore.from_file(path).to_df()
+        if path.exists():
+            try:
+                return db.DBNStore.from_file(path).to_df()
+            except Exception:                             # noqa: BLE001 -- damaged/partial cache file
+                print(f"  (re-downloading damaged cache file {path.name})")
+                path.unlink()
+        last_err = None
+        for attempt in (1, 2):
+            part = path.with_name(path.name + f".part{attempt}")
+            part.unlink(missing_ok=True)
+            err = self._download(part, req)
+            if err is None:
+                part.replace(path)
+                return db.DBNStore.from_file(path).to_df()
+            last_err = err
+            print(f"  (download attempt {attempt} failed: {err})", flush=True)
+        raise RuntimeError(last_err)
+
+    def _download(self, part, req):
+        """Run get_range in a background thread with a wall-clock limit. Returns None or an error."""
+        import threading
+        box = {}
+
+        def work():
+            try:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")           # "no data" / degraded-day notices
+                    self.client.timeseries.get_range(dataset=DATASET, schema=SCHEMA, path=part, **req)
+                box["ok"] = True
+            except Exception as exc:                          # noqa: BLE001
+                box["err"] = str(exc).splitlines()[0] if str(exc) else type(exc).__name__
+
+        th = threading.Thread(target=work, daemon=True)       # daemon: a stuck socket can't block exit
+        th.start()
+        th.join(DOWNLOAD_TIMEOUT)
+        if th.is_alive():
+            return f"no response after {DOWNLOAD_TIMEOUT}s"
+        if "ok" in box and part.exists():
+            return None
+        return box.get("err", "download produced no file")
 
     def chain(self, ticker, d) -> dict:
         s, e = et_window(d, ENTRY_TIME)
