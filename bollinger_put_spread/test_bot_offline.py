@@ -76,6 +76,10 @@ check("exit: stop at >= 2x", rules.exit_reason(1.0, 2.0, 100, 90, 40) == "stop_l
 check("exit: backup stop under short strike", rules.exit_reason(1.0, 1.2, 89.9, 90, 40) == "backup_stop")
 check("exit: time stop at 21 DTE", rules.exit_reason(1.0, 0.9, 100, 90, 21) == "time_stop")
 check("exit: nothing otherwise", rules.exit_reason(1.0, 0.9, 100, 90, 22) is None)
+check("exit: stops can be switched off", rules.exit_reason(1.0, 3.0, 80, 90, 40, stop_mult=None, backup=False) is None
+      and rules.exit_reason(1.0, 0.4, 80, 90, 40, stop_mult=None, backup=False) == "take_profit")
+check("exit: time stop setting", rules.exit_reason(1.0, 0.9, 100, 90, 8, time_dte=7) is None
+      and rules.exit_reason(1.0, 0.9, 100, 90, 7, time_dte=7) == "time_stop")
 
 bk = [dict(ticker="NVDA", sector="Technology"), dict(ticker="MSFT", sector="Technology")]
 check("limits: sector cap", "sector" in rules.limit_violation("AMD", "Technology", bk, 5, 2, 1))
@@ -291,9 +295,16 @@ with tempfile.TemporaryDirectory() as tmp:
               and tp.legs[0].position_intent == PositionIntent.BUY_TO_CLOSE)
         check("B2 no exit on day one", len(f.submitted) == 2, logs()[-2].get("exit"))
 
-        # price falls under the short strike -> backup stop / stop: cancels TP, submits a debit close
+        # default (no stops): price falls under the short strike -> nothing happens
         f.price = sk - 3
+        n_before = len(f.submitted)
         run("--manage")
+        check("B3a default no stops: a drop below the short strike doesn't close", len(f.submitted) == n_before
+              and "order-2" not in f.cancelled)
+        # with the stops switched back on -> backup stop / stop: cancels TP, submits a debit close
+        bot.USE_STOP_LOSS = bot.USE_BACKUP_STOP = True
+        run("--manage")
+        bot.USE_STOP_LOSS = bot.USE_BACKUP_STOP = False
         ev = [e for e in logs() if e["action"] == "close_submitted"]
         check("B3 stop: resting TP cancelled first", "order-2" in f.cancelled)
         check("B3 stop: close submitted", ev and ev[-1]["exit_reason"] in ("stop_loss", "backup_stop"), ev[-1]["exit_reason"] if ev else "")
@@ -317,7 +328,22 @@ with tempfile.TemporaryDirectory() as tmp:
     f.price = 185                               # rally -> spread decays
     run("--manage")
     ev = [e for e in logs() if e["action"] == "close_submitted"]
-    check("B5 take profit when value <= 50% credit", ev and ev[-1]["exit_reason"] == "take_profit")
+    check("B5 value <= 50% with a resting TP working: waits for it, no second order",
+          not ev and "order-2" not in f.cancelled and logs()[-2]["action"] == "wait", logs()[-2].get("reason"))
+with tempfile.TemporaryDirectory() as tmp:
+    bot.RESTING_TP_ORDER = False
+    f = signal_then_enter(tmp)
+    st = json.loads(bot.STATE_FILE.read_text())["spreads"][0]
+    f.orders["order-1"] = ("filled", 1, -st["limit_credit"])
+    f.positions = [(st["short_symbol"], -1), (st["long_symbol"], 1)]
+    f.price = 185
+    run("--manage")
+    bot.RESTING_TP_ORDER = True
+    ev = [e for e in logs() if e["action"] == "close_submitted"]
+    cl = f.submitted[-1]
+    check("B5b no resting TP: take profit is a DAY limit at 50% of the credit",
+          ev and ev[-1]["exit_reason"] == "take_profit" and cl.time_in_force == TimeInForce.DAY
+          and abs(cl.limit_price - round(st["limit_credit"] / 2, 2)) < 1e-9, str(cl.limit_price))
 with tempfile.TemporaryDirectory() as tmp:
     f = signal_then_enter(tmp)
     st = json.loads(bot.STATE_FILE.read_text())["spreads"][0]

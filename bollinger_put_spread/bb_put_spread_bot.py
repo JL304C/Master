@@ -23,11 +23,13 @@ Rules (bb_rules.py holds the pure logic):
     One multi-leg DAY limit order at the mid credit, 1 contract.
     Skip if the mid credit < $0.50. Max 5 open spreads, 2 per sector, 1 per ticker.
     Optionally leaves a resting GTC buy-to-close at 50% of the credit once filled.
-  EXITS   (run ~3:45 PM ET, --manage), using mid prices:
-    stop-loss       spread value >= 2x entry credit
-    backup stop     underlying (latest price near the close) below the short strike
-    take profit     spread value <= 50% of entry credit
-    time stop       21 DTE or less
+  EXITS   (run ~3:45 PM ET, --manage), using mid prices. Current settings (real-price exit
+    study): NO stops -- take profit + time stop only.
+    stop-loss       spread value >= 2x entry credit          (USE_STOP_LOSS, now off)
+    backup stop     underlying below the short strike         (USE_BACKUP_STOP, now off)
+    take profit     the resting GTC at 50% of the credit fills (or a DAY limit at 50% if
+                    there is no resting order and the mid is at/below 50%)
+    time stop       EXIT_TIME_DTE (21) days or less, at the natural price
 
 Every signal (taken or skipped, with the reason) goes to bb_signals.csv; every closed
 trade (dates, strikes, credit, exit price, P&L, exit reason) goes to bb_trades.csv;
@@ -114,6 +116,13 @@ STRIKE_OFFSET = 0.05          # B: short strike below min(POC, lower band) x (1 
 DTE_MIN, DTE_MAX = 45, 90     # monthly expirations 45-90 DTE, as originally specified
 MONTHLY_ONLY = True
 RESTING_TP_ORDER = True       # leave a GTC buy-to-close at 50% of the credit after the fill
+# Exits, from the real-price exit study (bb_exit_study.py, 2026-09-30): every rule with a stop
+# lost money; take profit + time stop only was the one positive result (+$1,675 / 75 trades,
+# t 1.4 -- not proven; paper-trading it is the out-of-sample test). A spread's loss is already
+# capped at its width. Set both True to restore the original stops.
+USE_STOP_LOSS = False         # close when the spread is worth >= 2x the credit
+USE_BACKUP_STOP = False       # close when the stock is below the short strike near the close
+EXIT_TIME_DTE = 21            # time stop (days to expiration); keep >= 1 to avoid expiration/assignment
 EARNINGS_HORIZON = "6month"   # Alpha Vantage EARNINGS_CALENDAR horizon (covers 90 DTE)
 BAR_DAYS = 300                # calendar days of daily bars fetched (>= 126 trading days)
 
@@ -588,13 +597,22 @@ def run_manage(state: dict) -> None:
         if sp["short_symbol"] in q and sp["long_symbol"] in q:
             value = round(q[sp["short_symbol"]]["mid"] - q[sp["long_symbol"]]["mid"], 2)
         dte = (date.fromisoformat(sp["expiration"]) - today).days
-        reason = rules.exit_reason(sp["entry_credit"], value, price, sp["short_strike"], dte)
+        reason = rules.exit_reason(sp["entry_credit"], value, price, sp["short_strike"], dte,
+                                   stop_mult=rules.STOP_MULT if USE_STOP_LOSS else None,
+                                   backup=USE_BACKUP_STOP, time_dte=max(1, EXIT_TIME_DTE))
         log({"action": "check", "ticker": sp["ticker"], "price": price, "spread_value": value,
              "entry_credit": sp["entry_credit"], "dte": dte, "exit": reason})
         if value is None:
             log({"action": "alert", "ticker": sp["ticker"], "reason": "no two-sided quote on a leg -- "
                  "only the price-based backup stop and time stop could be checked"})
         if not reason:
+            continue
+        target = max(0.01, round(rules.TAKE_PROFIT_FRAC * sp["entry_credit"], 2))
+        if reason == "take_profit" and sp.get("tp_order_id"):
+            # the resting GTC at 50% is working; as in the exit study, the take profit is ITS fill,
+            # not a close at the natural price
+            log({"action": "wait", "ticker": sp["ticker"], "reason": f"mid {value} <= 50% of credit; "
+                 f"resting take-profit at {target} is working"})
             continue
         if sp.get("tp_order_id"):
             status, filled, fap = cancel_and_confirm(sp["tp_order_id"]) if not DRY_RUN else ("canceled", 0, None)
@@ -603,8 +621,11 @@ def run_manage(state: dict) -> None:
                 sp["status"] = "closed"
                 continue
             sp["tp_order_id"] = None
-        # marketable limit: pay the natural debit (short ask - long bid) so the exit fills
-        if value is not None:
+        # take profit without a resting order: a DAY limit at 50% of the credit.
+        # other exits: marketable limit, paying the natural debit (short ask - long bid) so it fills
+        if reason == "take_profit":
+            limit = target
+        elif value is not None:
             limit = max(0.01, round(q[sp["short_symbol"]]["ask"] - q[sp["long_symbol"]]["bid"], 2))
         else:
             limit = round(sp["short_strike"] - sp["long_strike"], 2)   # no quotes: cap at the spread's max value

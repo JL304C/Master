@@ -8,6 +8,10 @@ That means it can share the account with the condor bot and the other bots.
 **Not backtested yet.** The condor strategy was backtested before its bot was written. This strategy has not been.
 Treat the paper results as the first test.
 
+> **Exits changed 2026-09-30:** no stops (`USE_STOP_LOSS = USE_BACKUP_STOP = False`). Exits are the resting 50%
+> take-profit plus the time stop (`EXIT_TIME_DTE = 21`). This was the only positive rule in the real-price exit study
+> (see below). It is paper trading as an out-of-sample test.
+>
 > **Current settings: backtest variant A+B, 9 tickers** (chosen 2026-09-29 from the 11-ticker stock-side backtest).
 > - **A:** the signal is a close back *above* the lower band the day after an oversold close.
 > - **B:** the short strike is 5% below the lower of the POC and the band.
@@ -115,7 +119,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 64 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 68 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;
@@ -205,3 +209,23 @@ under different exit rules, using the same real 3:45 PM quotes.
   post-21-DTE quotes that the long-hold rules need. It asks y/N first and caches what it gets.
 - **Run:** `python bb_exit_study.py` or `python bb_exit_study.py --download`.
 - **Offline test:** `python test_exit_study_offline.py`.
+
+**Exit-study results (real prices, same 75 signal and 526 baseline entries, run 2026-09-30):**
+
+| Exit rule | Signal (A+B) total / t | Signal ex pre-split AMZN/GOOGL | Baseline total / t |
+|---|---|---|---|
+| as tested (reproduces the first run) | −$3,018 / −1.7 | −$535 | −$8,923 / −2.2 |
+| resting 50% TP (the bot) | −$3,023 / −1.7 | −$565 | −$11,824 / −2.9 |
+| no 2× stop | −$1,238 / −0.8 | +$330 | −$5,155 / −1.2 |
+| no backup stop | −$568 / −0.4 | −$170 | −$12,479 / −3.0 |
+| 3× stop only | −$303 / −0.2 | −$140 | −$4,987 / −1.2 |
+| **no stops** (TP + 21 DTE) | **+$1,675 / 1.4**, 83% won | +$468 | −$1,757 / −0.4 |
+| 25% take-profit | −$3,278 / −2.0 | −$1,287 | −$16,172 / −4.5 |
+
+- **The stops were what made it lose.** Every rule with a stop is negative. With no stops, the signal version is the
+  only positive result.
+- **It is still not proven.** It is +$1,675 over 75 trades, but the t of 1.4 isn't significant, and it drops to +$468
+  without the pre-split AMZN and GOOGL trades.
+- **It was chosen after the fact.** It is the best of 7 rules tried on the same data, so it needs out-of-sample
+  confirmation, such as paper trading, before it can be trusted.
+- **The no-signal baseline stays negative under every rule.**

@@ -162,16 +162,18 @@ def eligible_expirations(listed: list[date], today: date, next_earnings: date | 
 # exits
 # --------------------------------------------------------------------------- #
 def exit_reason(entry_credit: float, spread_value: float | None, underlying: float,
-                short_strike: float, dte: int) -> str | None:
+                short_strike: float, dte: int, stop_mult: float | None = STOP_MULT,
+                backup: bool = True, time_dte: int = TIME_STOP_DTE) -> str | None:
     """Which exit (if any) fires today, checked in this order: stop-loss, backup stop,
-    take profit, time stop. spread_value = short mid - long mid (the cost to close)."""
-    if spread_value is not None and spread_value >= STOP_MULT * entry_credit:
+    take profit, time stop. spread_value = short mid - long mid (the cost to close).
+    stop_mult=None / backup=False switch those stops off (the bot's current setting)."""
+    if stop_mult is not None and spread_value is not None and spread_value >= stop_mult * entry_credit:
         return "stop_loss"
-    if underlying < short_strike:
+    if backup and underlying < short_strike:
         return "backup_stop"
     if spread_value is not None and spread_value <= TAKE_PROFIT_FRAC * entry_credit:
         return "take_profit"
-    if dte <= TIME_STOP_DTE:
+    if dte <= time_dte:
         return "time_stop"
     return None
 
