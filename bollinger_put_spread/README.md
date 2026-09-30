@@ -25,6 +25,24 @@ Treat the paper results as the first test.
 >
 > The original rules are one switch away: `ENTRY_SIGNAL = "cross_below"`, `STRIKE_OFFSET = 0.0`.
 
+> **Real option prices (Databento OPRA, run 2026-09-30), 9 tickers, 2016–Sep 2026, 1 contract:**
+>
+> | | Trades | Won | Total (exits at the natural price) | t | Total if every exit filled at the mid |
+> |---|---|---|---|---|---|
+> | **A+B (the bot)** | 75 | 64% | **−$3,018** | −1.7 | −$491 |
+> | No-signal baseline, weekly | 526 | 70% | −$8,923 | −2.2 | +$5,366 |
+>
+> - A+B lost money on 8 of 9 tickers; AMD made +$37.
+> - A+B loses even in the optimistic case where every exit fills at the mid.
+> - The model had estimated +$1,505 for A+B.
+> - Wins average about +$45 (the 50% take-profit) and losses −$100 to −$300 (the 2× stop and the backup stop).
+> - Paying the bid/ask on exits removes what little edge the mid prices show.
+> - Pre-split AMZN and GOOGL (strikes over $1,000) account for the largest losses. Without them, A+B is still −$605
+>   over 62 trades.
+> - Some trades are missing because Databento timed out: 4 signal trades and 48 baseline trades.
+>
+> **Verdict:** the strategy has no edge with real prices. Paper-trading it only confirms a losing rule set.
+
 ## Rules (as originally specified)
 
 | Step | Rule |
