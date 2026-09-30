@@ -29,7 +29,7 @@ Rules (bb_rules.py holds the pure logic):
     backup stop     underlying below the short strike         (USE_BACKUP_STOP, now off)
     take profit     the resting GTC at 50% of the credit fills (or a DAY limit at 50% if
                     there is no resting order and the mid is at/below 50%)
-    time stop       EXIT_TIME_DTE (21) days or less, at the natural price
+    time stop       EXIT_TIME_DTE (7) days or less, at the natural price
 
 Every signal (taken or skipped, with the reason) goes to bb_signals.csv; every closed
 trade (dates, strikes, credit, exit price, P&L, exit reason) goes to bb_trades.csv;
@@ -122,7 +122,10 @@ RESTING_TP_ORDER = True       # leave a GTC buy-to-close at 50% of the credit af
 # capped at its width. Set both True to restore the original stops.
 USE_STOP_LOSS = False         # close when the spread is worth >= 2x the credit
 USE_BACKUP_STOP = False       # close when the stock is below the short strike near the close
-EXIT_TIME_DTE = 21            # time stop (days to expiration); keep >= 1 to avoid expiration/assignment
+# 7 DTE: "no stops, 7 DTE" in the exit study (+$3,353 / 75 trades, 89% won, t 2.9). Holding to
+# expiry scored higher (+$4,589, 99% won) but carries the last week's gamma and assignment risk
+# and a 99% win rate means the rare max-loss trade is barely sampled -- 7 DTE is the safer pick.
+EXIT_TIME_DTE = 7             # time stop (days to expiration); keep >= 1 to avoid expiration/assignment
 EARNINGS_HORIZON = "6month"   # Alpha Vantage EARNINGS_CALENDAR horizon (covers 90 DTE)
 BAR_DAYS = 300                # calendar days of daily bars fetched (>= 126 trading days)
 
@@ -600,6 +603,8 @@ def run_manage(state: dict) -> None:
         reason = rules.exit_reason(sp["entry_credit"], value, price, sp["short_strike"], dte,
                                    stop_mult=rules.STOP_MULT if USE_STOP_LOSS else None,
                                    backup=USE_BACKUP_STOP, time_dte=max(1, EXIT_TIME_DTE))
+        if reason == "take_profit" and dte <= max(1, EXIT_TIME_DTE):
+            reason = "time_stop"          # never wait on an unfilled resting TP past the time stop
         log({"action": "check", "ticker": sp["ticker"], "price": price, "spread_value": value,
              "entry_credit": sp["entry_credit"], "dte": dte, "exit": reason})
         if value is None:

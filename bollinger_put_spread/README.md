@@ -9,8 +9,8 @@ That means it can share the account with the condor bot and the other bots.
 Treat the paper results as the first test.
 
 > **Exits changed 2026-09-30:** no stops (`USE_STOP_LOSS = USE_BACKUP_STOP = False`). Exits are the resting 50%
-> take-profit plus the time stop (`EXIT_TIME_DTE = 21`). This was the only positive rule in the real-price exit study
-> (see below). It is paper trading as an out-of-sample test.
+> take-profit plus a **7-DTE** time stop (`EXIT_TIME_DTE = 7`). This is "no stops, 7 DTE" in the real-price exit
+> study below. It is paper trading as an out-of-sample test.
 >
 > **Current settings: backtest variant A+B, 9 tickers** (chosen 2026-09-29 from the 11-ticker stock-side backtest).
 > - **A:** the signal is a close back *above* the lower band the day after an oversold close.
@@ -119,7 +119,7 @@ Exit orders are limit orders at the natural price (short ask − long bid), so t
 
 ## Tests
 
-`python test_bot_offline.py` runs 68 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
+`python test_bot_offline.py` runs 69 checks with no network and no keys. It checks the rules directly (bands, cross, POC,
 strike pick, monthly/earnings filter, exits, limits, earnings CSV). It then runs the bot against fake Alpaca and
 Alpha Vantage data through:
 - signal → next-morning order;
@@ -221,6 +221,9 @@ under different exit rules, using the same real 3:45 PM quotes.
 | 3× stop only | −$303 / −0.2 | −$140 | −$4,987 / −1.2 |
 | **no stops** (TP + 21 DTE) | **+$1,675 / 1.4**, 83% won | +$468 | −$1,757 / −0.4 |
 | 25% take-profit | −$3,278 / −2.0 | −$1,287 | −$16,172 / −4.5 |
+| hold to 7 DTE, with stops | −$2,701 / −1.5 | −$283 | not run |
+| **no stops, 7 DTE (the bot now)** | **+$3,353 / 2.9**, 89% won | **+$1,715** | not run |
+| no stops, to expiry | +$4,589 / 4.6, 99% won | +$2,951 | not run |
 
 - **The stops were what made it lose.** Every rule with a stop is negative. With no stops, the signal version is the
   only positive result.
@@ -228,4 +231,8 @@ under different exit rules, using the same real 3:45 PM quotes.
   without the pre-split AMZN and GOOGL trades.
 - **It was chosen after the fact.** It is the best of 7 rules tried on the same data, so it needs out-of-sample
   confirmation, such as paper trading, before it can be trusted.
-- **The no-signal baseline stays negative under every rule.**
+- **The no-signal baseline stays negative under every 21-DTE rule.** The long-hold rules were only run for the
+  signal version (`--download --only signal`).
+- **7 DTE was chosen over holding to expiry,** even though expiry scored higher. The last week carries gamma and
+  assignment risk, and a 99% win rate means the rare max-loss trade (−$780 here) is barely sampled. Both results come
+  from picking the best of 10 rules on the same 75 trades, so the t values overstate the evidence.

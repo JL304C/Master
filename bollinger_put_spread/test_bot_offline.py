@@ -360,10 +360,14 @@ with tempfile.TemporaryDirectory() as tmp:
     st = json.loads(bot.STATE_FILE.read_text())["spreads"][0]
     f.orders["order-1"] = ("filled", 1, -st["limit_credit"])
     f.positions = [(st["short_symbol"], -1), (st["long_symbol"], 1)]
-    TODAY = date.fromisoformat(st["expiration"]) - timedelta(days=21)
+    TODAY = date.fromisoformat(st["expiration"]) - timedelta(days=bot.EXIT_TIME_DTE + 1)
+    run("--manage")
+    check("B7a no time stop one day before EXIT_TIME_DTE",
+          not [e for e in logs() if e["action"] == "close_submitted"])
+    TODAY = date.fromisoformat(st["expiration"]) - timedelta(days=bot.EXIT_TIME_DTE)
     run("--manage")
     ev = [e for e in logs() if e["action"] == "close_submitted"]
-    check("B7 time stop at 21 DTE", ev and ev[-1]["exit_reason"] == "time_stop")
+    check("B7 time stop at EXIT_TIME_DTE (7)", ev and ev[-1]["exit_reason"] == "time_stop")
 
 with tempfile.TemporaryDirectory() as tmp:
     f = signal_then_enter(tmp, crash=False)
