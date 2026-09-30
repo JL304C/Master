@@ -184,3 +184,24 @@ enters on the last trading day of each week when flat, with the short strike abo
 - **Run:** `python bb_real_options.py` (options: `--tickers AMD,MSFT`, `--only signal|baseline`, `--start 2016-01-01`).
   It writes `bb_real_option_trades.csv`.
 - **Offline test:** `python test_real_options_offline.py`, with no network and no keys.
+
+## Exit-rule study (`bb_exit_study.py`)
+
+This keeps the **same entries** as `bb_real_options.py` (A+B signal and the no-signal baseline) and scores each trade
+under different exit rules, using the same real 3:45 PM quotes.
+
+- **Rules tested:**
+  - the rules as tested;
+  - the bot's resting 50% take-profit, filled at its limit once the natural price reaches it;
+  - no 2× stop;
+  - no backup stop;
+  - a 3× stop only;
+  - no stops at all;
+  - a 25%-profit take-profit;
+  - holding to 7 DTE, with or without stops;
+  - holding to expiry.
+- **Check against the first run:** the "as tested" row reproduces `bb_real_options.py`'s P&L trade for trade.
+- **Downloads:** by default it runs from the cache only, with no Databento calls. `--download` also fetches the
+  post-21-DTE quotes that the long-hold rules need. It asks y/N first and caches what it gets.
+- **Run:** `python bb_exit_study.py` or `python bb_exit_study.py --download`.
+- **Offline test:** `python test_exit_study_offline.py`.

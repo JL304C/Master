@@ -136,8 +136,9 @@ def root_changes_between(ticker: str, d0: date, d1: date) -> bool:
 
 
 class DatabentoQuotes:
-    def __init__(self, client):
+    def __init__(self, client, offline=False):
         self.client = client
+        self.offline = offline                               # True: use the cache only, never download
         CACHE.mkdir(exist_ok=True)
 
     def _chain_path(self, ticker, d):
@@ -166,6 +167,8 @@ class DatabentoQuotes:
             except Exception:                             # noqa: BLE001 -- damaged/partial cache file
                 print(f"  (re-downloading damaged cache file {path.name})")
                 path.unlink()
+        if self.offline:
+            raise RuntimeError("not in the cache (offline)")
         last_err = None
         for attempt in (1, 2):
             part = path.with_name(path.name + f".part{attempt}")
@@ -207,7 +210,8 @@ class DatabentoQuotes:
             return parse_chain_df(self._load(self._chain_path(ticker, d), symbols=[f"{option_root(ticker, d)}.OPT"],
                                              stype_in="parent", start=s, end=e))
         except Exception as exc:                          # noqa: BLE001 -- that morning counts as "no quotes"
-            print(f"  {ticker} {d}: no option data ({str(exc).splitlines()[0]})")
+            if not self.offline:
+                print(f"  {ticker} {d}: no option data ({str(exc).splitlines()[0]})")
             return {}
 
     def window(self, symbols, d0, d1) -> dict:
@@ -218,7 +222,8 @@ class DatabentoQuotes:
         try:
             return parse_window_df(self._load(path, symbols=list(symbols), stype_in="raw_symbol", start=s, end=e))
         except Exception as exc:                          # noqa: BLE001
-            print(f"  {symbols} {d0}..{d1}: no option data ({str(exc).splitlines()[0]})")
+            if not self.offline:
+                print(f"  {symbols} {d0}..{d1}: no option data ({str(exc).splitlines()[0]})")
             return None
 
 
@@ -299,7 +304,7 @@ def entry_setups(ticker, bars, raw, earnings, mode, first_day):
             yield i, (cap, cap), {}
 
 
-def replay(ticker, bars, raw, earnings, mode, quotes, first_day, log):
+def replay(ticker, bars, raw, earnings, mode, quotes, first_day, log, on_window=None):
     trades, skips, busy_until = [], {}, -1
     n = len(bars)
 
@@ -362,6 +367,9 @@ def replay(ticker, bars, raw, earnings, mode, quotes, first_day, log):
             skip("no quotes during the trade")
             busy_until = end
             continue
+        if on_window:                                         # bb_exit_study.py scores other exit rules here
+            on_window(t, dict(bars=bars, raw=raw, e=e, end=end, exp=exp, short=short, long=long, credit=credit,
+                              sym_s=sym_s, sym_l=sym_l, daily=daily))
         exit_j = reason = None
         last_q = None
         for j in range(e, end + 1):
