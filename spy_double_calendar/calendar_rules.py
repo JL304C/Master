@@ -9,6 +9,7 @@ Structures (entered Tuesday morning, or Wednesday when Tuesday is a market holid
   FF  short Friday ~10 DTE, long the next Friday        (the base trade, VIX < 20)
   FM  short Friday ~10 DTE, long the Monday after it    (his alternative long leg)
   WF  short Wednesday ~8 DTE, long the Friday after it  (his high-VIX "Wednesday trick")
+  FF2 short Friday ~10 DTE, long two Fridays later       ("pad the expiry": a wider profit tent)
 
 Exits (spec): scale out half at +20% of the debit and the rest at +30%; exit everything
 when SPY touches either strike; otherwise be out 3 calendar days before a Friday short
@@ -36,6 +37,7 @@ STRUCTURES = {
     "FF": Structure("FF", FRIDAY, (9, 15), 7, 3, "short Fri ~10 DTE / long next Fri"),
     "FM": Structure("FM", FRIDAY, (9, 15), 3, 3, "short Fri ~10 DTE / long the Monday after"),
     "WF": Structure("WF", WEDNESDAY, (6, 14), 2, 2, "short Wed ~8 DTE / long the Friday after"),
+    "FF2": Structure("FF2", FRIDAY, (9, 15), 14, 3, "short Fri ~10 DTE / long two Fridays later (padded expiry)"),
 }
 
 VIX_MAX = 20.0                     # "enter only when VIX is low ... ideally under 20"
@@ -46,6 +48,8 @@ class ExitRules:
     name: str
     targets: tuple = ((0.5, 0.20), (0.5, 0.30))   # (fraction of the position, profit as a fraction of the debit)
     touch_stop: bool = True                        # SPY trades at/through either strike -> exit everything
+    vix_hold: bool = False                         # "hold while VIX is flat or higher": exit at the end of a
+                                                   # day whose VIX close is below the entry VIX
 
 
 SPEC_EXITS = ExitRules("spec: half +20%, half +30%, touch, time")
@@ -57,6 +61,8 @@ EXIT_GRID = [
     ExitRules("no profit target (touch + time stop)", targets=()),
     ExitRules("no touch stop (targets + time stop)", touch_stop=False),
     ExitRules("time stop only", targets=(), touch_stop=False),
+    ExitRules("spec + exit when VIX closes below entry", vix_hold=True),
+    ExitRules("targets + VIX exit, no touch stop", touch_stop=False, vix_hold=True),
 ]
 
 
@@ -128,13 +134,14 @@ def pick_strike(target: float, available, below: float | None = None, above: flo
 # --------------------------------------------------------------------------- #
 # exits
 # --------------------------------------------------------------------------- #
-def simulate(debit: float, path, put_k: float, call_k: float, rules: ExitRules):
+def simulate(debit: float, path, put_k: float, call_k: float, rules: ExitRules, vix_entry: float | None = None):
     """
     Walk a position minute by minute.
 
     path: list of dicts {ts, hi, lo, val}: SPY high/low in that minute (None if no bar) and the
           value the position could be closed for at the end of it (None if a leg had no quote yet).
-          The last element is the time-stop minute.
+          The last element is the time-stop minute. A minute may also carry `vix`: that day's
+          VIX close, set on the last minute checked each day (used by rules.vix_hold).
     Profit targets are resting limit orders: they fill at their limit price once `val` reaches it.
     A strike touch closes the rest at the NEXT minute's value (time to see it and send the order).
     Returns [(fraction, price, reason, ts), ...] or None when the position never had a value.
@@ -160,6 +167,10 @@ def simulate(debit: float, path, put_k: float, call_k: float, rules: ExitRules):
                 return fills
         if rules.touch_stop and m["hi"] is not None and (m["hi"] >= call_k or m["lo"] <= put_k):
             pending_touch = True
+        if (rules.vix_hold and vix_entry is not None and m.get("vix") is not None and m["vix"] < vix_entry
+                and not pending_touch and last_val is not None and m is not path[-1]):
+            fills.append((remaining, last_val, "VIX fell", m["ts"]))
+            return fills
     if last_val is None:
         return None
     fills.append((remaining, last_val, "touch" if pending_touch else "time stop", path[-1]["ts"]))

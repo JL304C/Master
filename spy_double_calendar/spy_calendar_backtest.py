@@ -195,24 +195,39 @@ class MarketData:
         return self._months[key].get(d, {})
 
     # ---- VIX ----
-    def vix(self) -> dict:
-        path = CACHE / "vix_daily.csv"
+    INDEX_SOURCES = {
+        "VIX": ["https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+                "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"],
+        "VIX9D": ["https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX9D_History.csv"],
+        "VIX3M": ["https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv",
+                  "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VXVCLS"],
+    }
+
+    def index(self, name="VIX") -> dict:
+        """{date: close} for a Cboe volatility index (VIX, VIX9D, VIX3M); cached for a day.
+        VIX itself is required; the others return {} if they can't be had."""
+        path = CACHE / ("vix_daily.csv" if name == "VIX" else f"{name.lower()}_daily.csv")
         fresh = path.exists() and datetime.fromtimestamp(path.stat().st_mtime).date() >= date.today() - timedelta(days=1)
         if not fresh and not self.offline:
-            for url, parse in (("https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv", _parse_cboe),
-                               ("https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS", _parse_fred)):
+            for url in self.INDEX_SOURCES[name]:
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
                     text = urllib.request.urlopen(req, timeout=60).read().decode("utf-8-sig")
-                    rows = parse(text)
+                    rows = _parse_fred(text) if "fred." in url else _parse_cboe(text)
                     if len(rows) > 1000:
                         path.write_text("date,close\n" + "".join(f"{d},{c}\n" for d, c in sorted(rows.items())))
                         break
                 except Exception as exc:                                  # noqa: BLE001
-                    print(f"  (VIX download from {url.split('/')[2]} failed: {exc})")
+                    print(f"  ({name} download from {url.split('/')[2]} failed: {exc})")
         if not path.exists():
-            raise RuntimeError("no VIX history: put a vix_daily.csv (date,close) in cache/")
+            if name == "VIX":
+                raise RuntimeError("no VIX history: put a vix_daily.csv (date,close) in cache/")
+            print(f"  ({name} history unavailable: its filters will show no trades)")
+            return {}
         return {date.fromisoformat(r["date"]): float(r["close"]) for r in csv.DictReader(path.open())}
+
+    def vix(self) -> dict:
+        return self.index("VIX")
 
     # ---- options (Databento) ----
     def _client(self):
@@ -306,10 +321,16 @@ def _parse_cboe(text):
     out = {}
     for r in csv.DictReader(io.StringIO(text)):
         try:
-            out[datetime.strptime(r["DATE"], "%m/%d/%Y").date().isoformat()] = float(r["CLOSE"])
-        except (KeyError, ValueError):
+            close = r.get("CLOSE") or r.get(name_col(r))
+            out[datetime.strptime(r["DATE"], "%m/%d/%Y").date().isoformat()] = float(close)
+        except (KeyError, ValueError, TypeError):
             pass
     return out
+
+
+def name_col(r):
+    """Cboe files without a CLOSE column (e.g. 'DATE,VIX9D') keep the value in the last column."""
+    return list(r)[-1]
 
 
 def _parse_fred(text):
@@ -345,6 +366,20 @@ def mid(q):
     return (q[0] + q[1]) / 2
 
 
+def prev_close(series: dict, d: date):
+    past = [x for x in series if x < d]
+    return series[max(past)] if past else None
+
+
+def vix_percentile(vix: dict, d: date, n=60):
+    """Where the previous VIX close sits within the n closes before it (0 = lowest, 1 = highest)."""
+    past = sorted(x for x in vix if x < d)[-(n + 1):]
+    if len(past) < n // 2:
+        return None
+    last, hist = vix[past[-1]], [vix[x] for x in past[:-1]]
+    return sum(v < last for v in hist) / len(hist)
+
+
 def vix_context(vix: dict, d: date):
     """Previous close and its 20-day average (what is known at 10 AM on d)."""
     past = sorted(x for x in vix if x < d)[-20:]
@@ -356,8 +391,11 @@ def vix_context(vix: dict, d: date):
 class Week:
     """Everything the replay needs for one entry day, built once and shared by the structures."""
 
-    def __init__(self, d, data, vix):
+    def __init__(self, d, data, vix, vix9d=None, vix3m=None):
         self.d = d
+        self.vix9d = prev_close(vix9d, d) if vix9d else None
+        self.vix3m = prev_close(vix3m, d) if vix3m else None
+        self.vix_pct = vix_percentile(vix, d)
         bars = data.minutes(d)
         bar = bars.get(datetime.combine(d, ENTRY_TIME) - timedelta(minutes=1))
         self.spot = bar[2] if bar else None
@@ -387,7 +425,7 @@ def plan(entry: date, s: R.Structure, week: Week, td_set, trading_days, em_mult)
                 win=(datetime.combine(entry, ENTRY_TIME) - timedelta(minutes=5), datetime.combine(entry, ENTRY_TIME)))
 
 
-def build_path(data, entry, stop_day, trading_days, legs, q):
+def build_path(data, entry, stop_day, trading_days, legs, q, vix=None):
     """Minute path of SPY high/low and the position's mid and natural closing values."""
     series = {sym: q.get(sym, []) for sym in legs.values()}
     ptr = {sym: 0 for sym in series}
@@ -412,6 +450,9 @@ def build_path(data, entry, stop_day, trading_days, legs, q):
                 vm = mid(pl) + mid(cl) - mid(ps) - mid(cs)
                 vn = pl[0] + cl[0] - ps[1] - cs[1]            # sell longs at the bid, buy shorts at the ask
             path.append(dict(ts=end, hi=h, lo=l, mid=vm, nat=vn))
+        if path and path[-1]["ts"].date() == d:
+            path[-1]["eod"] = True
+            path[-1]["vix"] = (vix or {}).get(d)                  # that day's VIX close (~15 min after the check)
     return path
 
 
@@ -451,7 +492,7 @@ def run_trade(entry, s, p, week, data, fomc, trading_days, em_mult, skips):
         skip(f"debit < ${MIN_DEBIT:.2f}")
         return None
     hold = data.quotes(list(legs.values()), p["win"][1], datetime.combine(p["stop"], time(16, 0)))
-    path = build_path(data, entry, p["stop"], trading_days, legs, hold)
+    path = build_path(data, entry, p["stop"], trading_days, legs, hold, week.vix_series)
     if not path:
         skip("no SPY minute bars during the trade")
         return None
@@ -459,7 +500,8 @@ def run_trade(entry, s, p, week, data, fomc, trading_days, em_mult, skips):
              spot=round(week.spot, 2), vix=week.vix, vix20=round(week.vix20, 2), em=round(em, 2),
              em_pct=round(em / week.spot, 4), put_k=put_k, call_k=call_k, strike_clipped=clipped,
              debit_mid=round(debit_mid, 2), debit_nat=round(debit_nat, 2),
-             fomc=R.fomc_in_window(entry, p["stop"], fomc))
+             fomc=R.fomc_in_window(entry, p["stop"], fomc),
+             vix9d=week.vix9d, vix3m=week.vix3m, vix_pct60=week.vix_pct)
     for mode in MODES:
         debit = debit_mid if mode.startswith("mid") else debit_nat
         key = "mid" if mode.endswith("mid") else "nat"
@@ -472,8 +514,17 @@ def run_trade(entry, s, p, week, data, fomc, trading_days, em_mult, skips):
         t[f"ret {mode}"] = round(t[f"pnl {mode}"] / (debit * 100), 4)
         t[f"exit {mode}"] = R.final_reason(fills)
         t[f"exit_ts {mode}"] = R.exit_ts(fills)
-    path_h = [dict(ts=m["ts"], hi=m["hi"], lo=m["lo"], val=m["nat"]) for m in path]
-    t["grid"] = {r.name: R.pnl(R.simulate(debit_mid, path_h, put_k, call_k, r), debit_mid, FEES) for r in R.EXIT_GRID}
+    path_h = [dict(ts=m["ts"], hi=m["hi"], lo=m["lo"], val=m["nat"], vix=m.get("vix")) for m in path]
+    t["grid"] = {r.name: R.pnl(R.simulate(debit_mid, path_h, put_k, call_k, r, week.vix), debit_mid, FEES)
+                 for r in R.EXIT_GRID}
+    # his profit curve: the position's mid value vs the mid debit at each day's last check, and
+    # whether SPY had touched a strike by then
+    curve, touched = [], False
+    for m in path:
+        touched = touched or (m["hi"] is not None and (m["hi"] >= call_k or m["lo"] <= put_k))
+        if m.get("eod") and m["mid"] is not None:
+            curve.append((round(m["mid"] / debit_mid - 1, 4), touched))
+    t["curve"] = curve
     return t
 
 
@@ -481,12 +532,14 @@ def replay(data, start, end, structures, em_mult, assume_yes=False, log=print):
     trading_days = data.trading_days(start - timedelta(days=10), end + timedelta(days=30))
     td_set = set(trading_days)
     vix = data.vix()
+    vix9d, vix3m = data.index("VIX9D"), data.index("VIX3M")
     fomc = load_fomc()
     weeks, plans = {}, []
     for d in R.entry_days(trading_days):
         if not (start <= d <= end):
             continue
-        weeks[d] = Week(d, data, vix)
+        weeks[d] = Week(d, data, vix, vix9d, vix3m)
+        weeks[d].vix_series = vix
         for name in structures:
             p = plan(d, R.STRUCTURES[name], weeks[d], td_set, trading_days, em_mult)
             if p and p["stop"] <= trading_days[-1] and p["stop"] < date.today():
@@ -547,12 +600,12 @@ def stats(pnls, rets=None):
 
 def row(label, s, extra=""):
     if not s:
-        return f"  {label:<44} {'(no trades)':>8}"
-    return (f"  {label:<44} {s['n']:>4} {s['win']:>5.0%} {s['ret']:>+7.1%} {s['avg']:>+7.1f} {s['total']:>+9,.0f} "
+        return f"  {label:<50} {'(no trades)':>8}"
+    return (f"  {label:<50} {s['n']:>4} {s['win']:>5.0%} {s['ret']:>+7.1%} {s['avg']:>+7.1f} {s['total']:>+9,.0f} "
             f"{s['worst']:>+8,.0f} {s['dd']:>+9,.0f} {s['t']:>+5.1f}{extra}")
 
 
-HEAD = (f"  {'':<44} {'n':>4} {'win':>5} {'avg ret':>7} {'avg $':>7} {'total $':>9} {'worst':>8} {'max DD':>9} {'t':>5}"
+HEAD = (f"  {'':<50} {'n':>4} {'win':>5} {'avg ret':>7} {'avg $':>7} {'total $':>9} {'worst':>8} {'max DD':>9} {'t':>5}"
         f"   mid/mid total | nat/nat total")
 
 FILTERS = [
@@ -562,6 +615,15 @@ FILTERS = [
     ("VIX < 20 and <= its 20-day avg, no FOMC", lambda t: t["vix"] < R.VIX_MAX and t["vix"] <= t["vix20"] and not t["fomc"]),
     ("no FOMC (any VIX)", lambda t: not t["fomc"]),
     ("VIX >= 20, no FOMC", lambda t: t["vix"] >= R.VIX_MAX and not t["fomc"]),
+    ("VIX in lower half of its 60-day range, no FOMC",
+     lambda t: t["vix_pct60"] is not None and t["vix_pct60"] <= 0.5 and not t["fomc"]),
+    ("VIX in upper half of its 60-day range, no FOMC",
+     lambda t: t["vix_pct60"] is not None and t["vix_pct60"] > 0.5 and not t["fomc"]),
+    ("VIX9D > VIX (front stress), no FOMC", lambda t: t["vix9d"] and t["vix9d"] > t["vix"] and not t["fomc"]),
+    ("VIX9D <= VIX (normal), no FOMC", lambda t: t["vix9d"] and t["vix9d"] <= t["vix"] and not t["fomc"]),
+    ("VIX >= 0.95 x VIX3M (flat/inverted), no FOMC",
+     lambda t: t["vix3m"] and t["vix"] >= 0.95 * t["vix3m"] and not t["fomc"]),
+    ("VIX < 0.95 x VIX3M (contango), no FOMC", lambda t: t["vix3m"] and t["vix"] < 0.95 * t["vix3m"] and not t["fomc"]),
 ]
 
 
@@ -607,6 +669,20 @@ def report(trades, skips, structures, start, end, log):
             pn = [t["grid"][r.name] for t in spec]
             log(row(r.name, stats(pn, [p / (t["debit_mid"] * 100) for p, t in zip(pn, spec)])))
         log("")
+        log("His profit curve (~+10% by day 3, ~+30% after a week if SPY stays between the strikes) vs the real")
+        log(f"mid value of the {structures[0]} trades, by trading day after entry (all weeks, no exits applied):")
+        log(f"  {'day':>5} {'never touched: n':>17} {'avg':>7} {'median':>7} {'> 0':>5}   {'touched: n':>11} {'avg':>7}")
+        allt = [t for t in trades if t["structure"] == structures[0]]
+        for k in range(6):
+            nt = [t["curve"][k][0] for t in allt if len(t["curve"]) > k and not t["curve"][k][1]]
+            tt = [t["curve"][k][0] for t in allt if len(t["curve"]) > k and t["curve"][k][1]]
+            if not nt and not tt:
+                break
+            a = (f"{len(nt):>17} {statistics.fmean(nt):>+7.1%} {statistics.median(nt):>+7.1%} "
+                 f"{sum(x > 0 for x in nt) / len(nt):>5.0%}") if nt else f"{0:>17} {'':>21}"
+            b = f"{len(tt):>11} {statistics.fmean(tt):>+7.1%}" if tt else f"{0:>11}"
+            log(f"  {k + 1:>5} {a}   {b}")
+        log("")
         log("Exit reasons (spec trades, mid/nat):")
         reasons = {}
         for t in spec:
@@ -633,7 +709,7 @@ def report(trades, skips, structures, start, end, log):
 
 
 def write_csv(trades):
-    cols = [k for k in trades[0] if k != "grid"] + [f"grid: {r.name}" for r in R.EXIT_GRID]
+    cols = [k for k in trades[0] if k not in ("grid", "curve")] + [f"grid: {r.name}" for r in R.EXIT_GRID]
     with OUT_CSV.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -647,7 +723,7 @@ def main():
         require_keys(["ALPACA_API_KEY", "ALPACA_SECRET_KEY", "DATABENTO_API_KEY"], found)
     start = date.fromisoformat(arg("--start", "2016-01-01"))
     end = date.fromisoformat(arg("--end", (date.today() - timedelta(days=14)).isoformat()))
-    structures = arg("--structures", "FF,FM,WF").upper().split(",")
+    structures = arg("--structures", "FF,FM,WF,FF2").upper().split(",")
     em_mult = float(arg("--em-mult", "1.0"))
     data = MarketData(offline="--offline" in sys.argv)
     lines = []

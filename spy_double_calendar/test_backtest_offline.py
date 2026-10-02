@@ -84,6 +84,13 @@ def test_simulate():
     f = R.simulate(debit, [m(0, 2.1, hi=700), m(1, 1.0)], put_k, call_k, R.EXIT_GRID[-1])
     assert R.final_reason(f) == "time stop"
     assert R.simulate(debit, [m(0, None)], put_k, call_k, R.SPEC_EXITS) is None
+    # VIX hold: exit at the end of a day whose VIX close is below the entry VIX, never on the last minute
+    vh = R.ExitRules("vix", targets=(), touch_stop=False, vix_hold=True)
+    p = [m(0, 2.1), dict(m(1, 2.05), vix=18.0), m(2, 2.3), dict(m(3, 1.9), vix=16.0), m(4, 2.6)]
+    f = R.simulate(debit, p, put_k, call_k, vh, vix_entry=17.0)
+    assert f == [(1.0, 1.9, "VIX fell", p[3]["ts"])], f
+    assert R.final_reason(R.simulate(debit, p, put_k, call_k, vh, vix_entry=15.0)) == "time stop"
+    assert R.final_reason(R.simulate(debit, p[:4], put_k, call_k, vh, vix_entry=17.0)) == "time stop"
     print("exit simulation ok")
 
 
@@ -136,6 +143,12 @@ class FakeData:
     def vix(self):
         return dict(self.vixd)
 
+    def index(self, name="VIX"):
+        k = {"VIX": 1.0, "VIX9D": None, "VIX3M": 1.06}[name]
+        if k is None:                                              # VIX9D above VIX in the high-VIX regime
+            return {d: v * (1.08 if v > 20 else 0.92) for d, v in self.vixd.items()}
+        return {d: v * k for d, v in self.vixd.items()}
+
     def is_cached(self, *a):
         return True
 
@@ -164,20 +177,31 @@ class FakeData:
         return out
 
 
+def ff_debit(by, d):
+    return [t for t in by["FF"] if t["entry"] == d][0]["debit_mid"]
+
+
 def test_pipeline():
     data = FakeData(date(2025, 1, 2), date(2025, 9, 30))
     old = B.load_fomc
     B.load_fomc = lambda: [date(2025, 3, 19), date(2025, 5, 7), date(2025, 6, 18), date(2025, 7, 30)]
     lines = []
     try:
-        trades, skips = B.replay(data, date(2025, 1, 7), date(2025, 8, 31), ["FF", "FM", "WF"], 1.0,
+        trades, skips = B.replay(data, date(2025, 1, 7), date(2025, 8, 31), ["FF", "FM", "WF", "FF2"], 1.0,
                                  log=lambda s="": lines.append(s))
     finally:
         B.load_fomc = old
     by = {}
     for t in trades:
         by.setdefault(t["structure"], []).append(t)
-    assert all(len(by.get(s, [])) >= 25 for s in ("FF", "FM", "WF")), {k: len(v) for k, v in by.items()}
+    assert all(len(by.get(s, [])) >= 25 for s in ("FF", "FM", "WF", "FF2")), {k: len(v) for k, v in by.items()}
+    f2 = [t for t in by["FF2"] if t["entry"] == date(2025, 3, 4)][0]
+    assert f2["short_exp"] == date(2025, 3, 14) and f2["long_exp"] == date(2025, 3, 28)
+    assert f2["debit_mid"] > ff_debit(by, date(2025, 3, 4))                    # more time bought -> bigger debit
+    for t in trades:
+        assert t["curve"] and all(isinstance(x, float) and isinstance(tc, bool) for x, tc in t["curve"])
+        assert t["vix9d"] and t["vix3m"] and t["vix_pct60"] is not None or t["entry"] < date(2025, 2, 15)
+    assert any(t["grid"]["spec + exit when VIX closes below entry"] != t["grid"][R.SPEC_EXITS.name] for t in by["FF"])
     for t in trades:
         assert t["put_k"] < t["spot"] < t["call_k"]
         assert t["entry"] < t["time_stop"] < t["short_exp"] < t["long_exp"]
@@ -199,9 +223,11 @@ def test_pipeline():
     assert good_friday and good_friday[0]["short_exp"] == date(2025, 4, 17)
     assert not [t for t in by["FM"] if t["entry"] == date(2025, 5, 13)]          # Memorial Day long leg
 
-    B.report(trades, skips, ["FF", "FM", "WF"], date(2025, 1, 7), date(2025, 8, 31), lambda s="": lines.append(s))
+    B.report(trades, skips, ["FF", "FM", "WF", "FF2"], date(2025, 1, 7), date(2025, 8, 31), lambda s="": lines.append(s))
     text = "\n".join(lines)
-    for needle in ("VIX < 20, no FOMC  <- the spec", "FF/WF switch on VIX", "Exit rules on the spec trades", "By year"):
+    for needle in ("VIX < 20, no FOMC  <- the spec", "FF/WF switch on VIX", "Exit rules on the spec trades", "By year",
+                   "His profit curve", "VIX9D > VIX (front stress)", "VIX < 0.95 x VIX3M (contango)",
+                   "FF2: short Fri ~10 DTE / long two Fridays later"):
         assert needle in text, needle
     with tempfile.TemporaryDirectory() as tmp:
         B.OUT_CSV = Path(tmp) / "t.csv"

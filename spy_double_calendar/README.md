@@ -13,7 +13,7 @@ that wrote this, so the first real run happens on your laptop.
 | Position | Put calendar below the price plus call calendar above it: sell the near expiry, buy the same strike at a later expiry |
 | Strikes | Listed strike nearest spot ± the **expected move**, which is the mid of the at-the-money straddle at the short expiry (`--em-mult` scales it) |
 | Entry | Tuesday at 10:00 AM ET, or Wednesday when Tuesday is a holiday. One trade per week per structure |
-| Structures | **FF** short Friday ~10 DTE, long the next Friday · **FM** short Friday ~10 DTE, long the Monday after · **WF** short Wednesday ~8 DTE, long the Friday after (the high-VIX "Wednesday trick") |
+| Structures | **FF** short Friday ~10 DTE, long the next Friday · **FM** short Friday ~10 DTE, long the Monday after · **WF** short Wednesday ~8 DTE, long the Friday after (the high-VIX "Wednesday trick") · **FF2** short Friday ~10 DTE, long two Fridays later ("pad the expiry") |
 | VIX filter | Prior day's VIX close < 20. An alternative also requires VIX at or below its 20-day average |
 | FOMC | Skip the week if an FOMC statement day falls between entry and the time stop (`fomc_dates.txt`) |
 | Profit | Resting limit orders: half the position at +20% of the debit, the rest at +30% |
@@ -38,8 +38,28 @@ A four-legged SPY order usually fills somewhere between the mid and the natural 
 - Per structure: all weeks, VIX < 20, **VIX < 20 with no FOMC (the spec)**, VIX ≥ 20, and so on. Columns: trades, win rate,
   average return on the debit, average and total $, worst trade, max drawdown, t-stat.
 - **His full plan:** FF when VIX < 20, WF when VIX ≥ 20. Also "run both" on high-VIX weeks.
-- An exit-rule grid on the spec trades: the spec, a single +20/30/50% target, no profit target, no touch stop, time stop only.
+- VIX filters beyond "< 20": VIX in the lower/upper half of its 60-day range (his "relative to the recent baseline"),
+  and the term structure: VIX9D above/below VIX, VIX at/above 0.95 × VIX3M vs contango (Cboe data, free).
+- An exit-rule grid on the spec trades: the spec, a single +20/30/50% target, no profit target, no touch stop, time stop
+  only, and his hold rule ("stay in while VIX is flat or higher": exit at the end of a day whose VIX close is below the
+  entry VIX; that close comes ~15 minutes after the 3:45 PM check, a small look-ahead).
+- **His profit curve check:** he shows ~+10% by day 3 and ~+30% after a week if SPY stays between the strikes. The
+  report prints the real mid value of every trade at each day's close, split by whether a strike had been touched yet.
 - Exit reasons, results by year, typical debit and strike distance, and the weeks skipped with the reason.
+
+## Trial result (Jan 2025 – Sep 2026, $0.43 of Databento data)
+
+| FF, mid in / natural out | Trades | Won | Total | t |
+|---|---|---|---|---|
+| **The spec: VIX < 20, no FOMC** | 58 | 40% | **−$637** | −1.9 |
+| All weeks | 89 | 47% | −$139 | −0.3 |
+| VIX ≥ 20, no FOMC | 17 | 59% | +$359 | +1.6 |
+
+- The spec lost money even with every fill at the mid (−$288). His 85% win rate was not reproduced.
+- Every structure made money only when VIX was 20 or higher. That is the opposite of his entry rule, and it rests on
+  17 weeks from two selloffs (Apr 2025, Mar 2026).
+- Trades that sat between the strikes until the time stop averaged −$18, not the +30% his profit curve promises.
+- Removing the touch stop helped (−$386 instead of −$637). FM (Monday long leg) was the worst structure (t −4.6).
 
 ## Running it (on your laptop)
 
