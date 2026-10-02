@@ -143,8 +143,13 @@ class MarketData:
         from alpaca.data.timeframe import TimeFrame
         import pytz
         et = pytz.timezone("America/New_York")
+        from datetime import timezone
+        # Alpaca's free plan serves SIP data only when it is more than 15 minutes old.
+        end_utc = min(et.localize(end).astimezone(timezone.utc), datetime.now(timezone.utc) - timedelta(minutes=16))
+        if end_utc <= et.localize(start).astimezone(timezone.utc):
+            return []
         req = StockBarsRequest(symbol_or_symbols=SYMBOL, timeframe=TimeFrame.Minute if minute else TimeFrame.Day,
-                               start=et.localize(start), end=et.localize(end),
+                               start=et.localize(start), end=end_utc,
                                adjustment=Adjustment.RAW, feed=DataFeed.SIP)
         bars = self._stock_client().get_stock_bars(req).data.get(SYMBOL, [])
         return [(b.timestamp.astimezone(et).replace(tzinfo=None), float(b.high), float(b.low), float(b.close))
