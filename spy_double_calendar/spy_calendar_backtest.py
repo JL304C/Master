@@ -73,16 +73,43 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 
+ENV_ALIASES = {"ALPACA_API_KEY": ("APCA_API_KEY_ID", "ALPACA_KEY", "ALPACA_KEY_ID"),
+               "ALPACA_SECRET_KEY": ("APCA_API_SECRET_KEY", "ALPACA_SECRET", "ALPACA_API_SECRET")}
+# Folders on the same machine that already hold the same keys (checked after this folder).
+SIBLING_ENV_DIRS = ("bollinger_put_spread", "nvda_delayed_condor", "gpc_wheel_bot", "nvda_bull_call_spread_bot")
+
+
 def load_env():
-    for cand in (HERE / ".env", HERE / ".env.txt", HERE / "env", HERE / "env.txt"):
-        if cand.exists():
-            raw = cand.read_bytes()
-            text = raw.decode("utf-16") if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else raw.decode("utf-8-sig", "replace")
-            for line in text.splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    k, v = line.split("=", 1)
-                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    """Read KEY=value lines from .env here, then from the sibling bot folders' .env files,
+    so keys already set up for the other bots work without copying."""
+    found = []
+    dirs = [HERE] + [HERE.parent / d for d in SIBLING_ENV_DIRS]
+    for folder in dirs:
+        for cand in (folder / ".env", folder / ".env.txt", folder / "env", folder / "env.txt"):
+            if cand.exists():
+                found.append(cand)
+                raw = cand.read_bytes()
+                text = raw.decode("utf-16") if raw.startswith((b"\xff\xfe", b"\xfe\xff")) else raw.decode("utf-8-sig", "replace")
+                for line in text.splitlines():
+                    line = line.strip()
+                    if line.lower().startswith("export "):
+                        line = line[7:].strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+    for name, alts in ENV_ALIASES.items():
+        for alt in alts:
+            if not os.environ.get(name) and os.environ.get(alt):
+                os.environ[name] = os.environ[alt]
+    return found
+
+
+def require_keys(names, found):
+    missing = [n for n in names if not os.environ.get(n)]
+    if missing:
+        where = "\n  ".join(str(p) for p in found) or "(no .env file found)"
+        sys.exit(f"Missing {', '.join(missing)}.\nLooked in:\n  {where}\n"
+                 f"Put a .env with these lines in {HERE}:\n" + "".join(f"  {n}=...\n" for n in missing))
 
 
 def osi(exp: date, right: str, strike: float) -> str:
@@ -610,7 +637,9 @@ def write_csv(trades):
 
 
 def main():
-    load_env()
+    found = load_env()
+    if "--offline" not in sys.argv:
+        require_keys(["ALPACA_API_KEY", "ALPACA_SECRET_KEY", "DATABENTO_API_KEY"], found)
     start = date.fromisoformat(arg("--start", "2016-01-01"))
     end = date.fromisoformat(arg("--end", (date.today() - timedelta(days=14)).isoformat()))
     structures = arg("--structures", "FF,FM,WF").upper().split(",")
