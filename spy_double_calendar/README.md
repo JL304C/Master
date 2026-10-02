@@ -1,0 +1,72 @@
+# SPY Weekly Double Calendar — Real-Option Backtest
+
+Tests a weekly double calendar on SPY using **real OPRA bid/ask quotes** (Databento) and real one-minute SPY bars (Alpaca).
+It is a backtest only. No bot exists yet.
+
+**Status: built and checked offline, not yet run on real data.** Databento and Cboe can't be reached from the cloud session
+that wrote this, so the first real run happens on your laptop.
+
+## The strategy as tested
+
+| | Rule |
+|---|---|
+| Position | Put calendar below the price plus call calendar above it: sell the near expiry, buy the same strike at a later expiry |
+| Strikes | Listed strike nearest spot ± the **expected move**, which is the mid of the at-the-money straddle at the short expiry (`--em-mult` scales it) |
+| Entry | Tuesday at 10:00 AM ET, or Wednesday when Tuesday is a holiday. One trade per week per structure |
+| Structures | **FF** short Friday ~10 DTE, long the next Friday · **FM** short Friday ~10 DTE, long the Monday after · **WF** short Wednesday ~8 DTE, long the Friday after (the high-VIX "Wednesday trick") |
+| VIX filter | Prior day's VIX close < 20. An alternative also requires VIX at or below its 20-day average |
+| FOMC | Skip the week if an FOMC statement day falls between entry and the time stop (`fomc_dates.txt`) |
+| Profit | Resting limit orders: half the position at +20% of the debit, the rest at +30% |
+| Price stop | SPY's one-minute high/low touches either strike → close everything on the next minute's quotes |
+| Time stop | 3:45 PM on the last trading day ≥3 days before a Friday short expiry (the following Tuesday), or ≥2 days before a Wednesday one (the Monday) |
+| Underwater, between strikes | Held to the time stop |
+| Costs | $0.03 per contract per leg, open and close ($0.24 per double calendar) |
+
+Every week is replayed regardless of VIX or FOMC. The filters are applied in the report, so filtered and unfiltered
+results come from the same trades. That gives the **no-signal baseline** that exposed the Bollinger and condor results.
+
+### Pricing: three columns
+
+- **mid/nat** (headline): enter at the mid, exit at the natural price (sell longs at the bid, buy back shorts at the ask). Same as `bb_real_options.py`.
+- **mid/mid** (optimistic): every fill at the mid.
+- **nat/nat** (pessimistic): market orders both ways.
+
+A four-legged SPY order usually fills somewhere between the mid and the natural price. If a result is only positive at mid/mid, it isn't real.
+
+### What the report shows
+
+- Per structure: all weeks, VIX < 20, **VIX < 20 with no FOMC (the spec)**, VIX ≥ 20, and so on. Columns: trades, win rate,
+  average return on the debit, average and total $, worst trade, max drawdown, t-stat.
+- **His full plan:** FF when VIX < 20, WF when VIX ≥ 20. Also "run both" on high-VIX weeks.
+- An exit-rule grid on the spec trades: the spec, a single +20/30/50% target, no profit target, no touch stop, time stop only.
+- Exit reasons, results by year, typical debit and strike distance, and the weeks skipped with the reason.
+
+## Running it (on your laptop)
+
+```
+cd spy_double_calendar
+pip install -r requirements.txt
+copy .env.example .env        (then fill in the Alpaca and Databento keys, same as the other folders)
+python test_backtest_offline.py                 # no keys needed: checks the logic on synthetic data
+python spy_calendar_backtest.py --start 2025-01-01      # small trial first: check the cost and the output
+python spy_calendar_backtest.py                 # full run, 2016 to two weeks ago
+```
+
+- It asks Alpaca for SPY bars and Cboe for VIX (both free), then prints a **Databento cost estimate** and waits for `y`.
+- Each trade needs two small Databento requests: a 5-minute window of ~70 contracts at entry, then the 4 chosen legs
+  for the holding week. The full run is ~1,600 trades (3 structures × ~540 weeks). The first run takes a while.
+  Everything is cached in `cache/`, so re-runs are free and `--offline` uses the cache only.
+- Options: `--structures FF` (one structure), `--em-mult 0.8` (strikes closer in), `--end 2025-12-31`, `--yes`.
+- Output: `spy_calendar_report.txt` (the tables) and `spy_calendar_trades.csv` (one row per trade, including the exit grid).
+
+## Known limits
+
+- **Fills.** Profit targets fill exactly at their limit price once the closing value reaches it. A touch exit uses the next
+  minute's quotes. Real four-leg fills can be worse in fast markets, which is when touches happen.
+- **Quotes.** These are one-minute consolidated BBO snapshots, carried forward when a leg doesn't update.
+- **Early expiries.** Wednesday SPY expiries start around 2016 and Monday expiries around 2018. Weeks without a listed expiry
+  appear under "Weeks skipped".
+- Early assignment and dividends aren't modelled. The touch stop and the exit before the short expiry make both unlikely.
+- **FOMC dates** were typed in from memory. Check them against the Fed's calendar before relying on the filter.
+  Other events (CPI, NFP) aren't filtered.
+- His 85% win rate and 100%+ a year are self-reported. This backtest is the check on those claims.

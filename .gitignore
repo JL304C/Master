@@ -3,3 +3,6 @@
 __pycache__/
 gpc_wheel_bot/gpc_wheel_log.jsonl
 gpc_wheel_bot/gpc_wheel_trades.csv
+spy_double_calendar/cache/
+spy_double_calendar/spy_calendar_trades.csv
+spy_double_calendar/spy_calendar_report.txt
