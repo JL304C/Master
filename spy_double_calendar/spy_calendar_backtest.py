@@ -404,7 +404,9 @@ class Week:
 
 def plan(entry: date, s: R.Structure, week: Week, td_set, trading_days, em_mult):
     """Contracts to look at on the entry morning (before any option data is known)."""
-    ex = R.expiries(entry, s, td_set.__contains__)
+    last_known = trading_days[-1]
+    # a date after the last known trading day can't be checked for a holiday: take it as listed
+    ex = R.expiries(entry, s, lambda d: d in td_set or d > last_known)
     if not ex or week.spot is None or week.vix is None:
         return None
     short, long = ex
