@@ -61,6 +61,31 @@ A four-legged SPY order usually fills somewhere between the mid and the natural 
 - Trades that sat between the strikes until the time stop averaged −$18, not the +30% his profit curve promises.
 - Removing the touch stop helped (−$386 instead of −$637). FM (Monday long leg) was the worst structure (t −4.6).
 
+## Full result (Jan 2016 – Sep 2026, ~$3 of Databento data) — verdict: no edge
+
+1 double calendar per trade, enter at the mid, exit at the natural price, fees included.
+(Run hit a full disk mid-2023, so part of 2023 is missing; rerun after freeing space.)
+
+| | Trades | Won | Total | t | Best case (mid/mid) | Worst case (nat/nat) |
+|---|---|---|---|---|---|---|
+| **FF, the spec (VIX < 20, no FOMC)** | 319 | 43% | **−$1,006** | −2.1 | +$279 | −$2,100 |
+| FF, all weeks | 544 | 46% | −$1,087 | −1.4 | +$2,023 | −$3,230 |
+| FF, VIX ≥ 20 | 140 | 44% | +$5 | 0.0 | +$940 | −$725 |
+| FM (Monday long leg), all weeks | 392 | 37% | −$1,709 | −4.5 | +$1,023 | −$3,475 |
+| WF ("Wednesday trick"), all weeks | 501 | 43% | −$1,628 | −4.0 | +$970 | −$3,508 |
+| His plan: FF if VIX < 20, WF if ≥ 20 | 451 | 42% | −$1,523 | −2.8 | | |
+| **FF2 (padded expiry), all weeks** | 542 | 50% | **+$809** | +0.7 | +$4,252 | −$1,345 |
+| FF, time stop only (no targets, no touch stop) | 319 | 50% | +$324 | +0.5 | | |
+
+- The spec loses. His 85% win rate is ~43% in real quotes.
+- The trial's "VIX ≥ 20 wins" faded to zero over 10 years; the term-structure filters (VIX9D, VIX3M)
+  are all within noise (|t| ≤ 1.2).
+- FM and WF lose under every filter.
+- His profit curve: trades that stayed between the strikes averaged +5% by day 3 and +4–6% by day 5–6 at the mid,
+  not +10% / +30%. The touch stop (136 of 319 spec trades) and the exit spread take the rest.
+- The best variants (FF2, no touch stop) are positive only at the mid and not significant. With ~20 combinations
+  tried, a t of ~1 is what chance alone produces.
+
 ## Running it (on your laptop)
 
 ```
