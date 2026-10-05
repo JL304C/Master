@@ -1,0 +1,8 @@
+databento
+pandas
+numpy
+scipy
+pyarrow
+matplotlib
+exchange_calendars
+pytest
