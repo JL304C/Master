@@ -277,31 +277,83 @@ def option_delta(sym: str, q: Quote, fwd: float) -> tuple[float | None, str]:
     p = parse_occ(sym)
     if q.delta is not None:
         return q.delta, "alpaca"
+    t = max((p["expiration"] - date.today()).days, 1) / 365.0
     if q.iv:
-        t = max((p["expiration"] - date.today()).days, 1) / 365.0
         return black76_delta(fwd, p["strike"], t, q.iv, p["right"]), "computed_from_alpaca_iv"
+    iv = implied_vol_from_mid(q.mid, fwd, p["strike"], t, p["right"])
+    if iv:
+        q.iv = iv   # so the IV ratio can use it too
+        return black76_delta(fwd, p["strike"], t, iv, p["right"]), "computed_from_mid_price"
     return None, "missing"
+
+
+def black76_price(fwd: float, strike: float, t: float, iv: float, right: str) -> float:
+    sd = iv * math.sqrt(t)
+    d1 = (math.log(fwd / strike) + 0.5 * sd * sd) / sd
+    d2 = d1 - sd
+    disc = math.exp(-RATE * t)
+    if right == "C":
+        return disc * (fwd * norm_cdf(d1) - strike * norm_cdf(d2))
+    return disc * (strike * norm_cdf(-d2) - fwd * norm_cdf(-d1))
+
+
+def implied_vol_from_mid(price: float, fwd: float, strike: float, t: float, right: str) -> float | None:
+    """Bisection on Black-76. Used when Alpaca's feed has no IV/greeks for SPXW."""
+    if price <= 0:
+        return None
+    lo, hi = 0.01, 3.0
+    if not (black76_price(fwd, strike, t, lo, right) < price < black76_price(fwd, strike, t, hi, right)):
+        return None
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if black76_price(fwd, strike, t, mid, right) < price:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+PICK_DIAG: dict = {}   # why candidate strikes were skipped, reported on failure
 
 
 def pick_strike(chain: dict[str, Quote], front: date, back: date, right: str, fwd: float) -> dict | None:
     """Strike nearest TARGET_DELTA on the OTM side whose back-month twin and
     5-wide front-month wing are both quoted."""
     best = None
+    why = PICK_DIAG.setdefault(right, {"front_otm_strikes": 0, "front_no_quote": 0, "back_missing": 0,
+                                       "back_no_quote": 0, "wing_missing": 0, "wing_no_quote": 0,
+                                       "no_delta": 0, "usable": 0})
     for sym, q in chain.items():
         p = parse_occ(sym)
-        if p["expiration"] != front or p["right"] != right or not q.ok:
+        if p["expiration"] != front or p["right"] != right:
             continue
         k = p["strike"]
         if (right == "P" and k >= fwd) or (right == "C" and k <= fwd):
             continue
+        why["front_otm_strikes"] += 1
+        if not q.ok:
+            why["front_no_quote"] += 1
+            continue
         wing_k = k - WING if right == "P" else k + WING
         back_q = chain.get(occ(back, right, k))
         wing_q = chain.get(occ(front, right, wing_k))
-        if not (back_q and back_q.ok and wing_q and wing_q.ok):
+        if back_q is None:
+            why["back_missing"] += 1
+            continue
+        if not back_q.ok:
+            why["back_no_quote"] += 1
+            continue
+        if wing_q is None:
+            why["wing_missing"] += 1
+            continue
+        if not wing_q.ok:
+            why["wing_no_quote"] += 1
             continue
         d, src = option_delta(sym, q, fwd)
         if d is None:
+            why["no_delta"] += 1
             continue
+        why["usable"] += 1
         err = abs(abs(d) - TARGET_DELTA)
         if best is None or err < best["err"]:
             best = {"err": err, "strike": k, "delta": d, "delta_source": src,
@@ -329,7 +381,12 @@ def build_plan() -> dict:
     put = pick_strike(chain, front, back, "P", fwd)
     call = pick_strike(chain, front, back, "C", fwd)
     if not put or not call:
-        raise RuntimeError("could not find ~35-delta strikes with back-month and wing contracts quoted")
+        raise RuntimeError(
+            "could not find ~35-delta strikes with back-month and wing contracts quoted.\n"
+            f"  front={front} back={back} SPX(parity)={fwd:.2f} chain contracts={len(chain)}\n"
+            f"  put candidates:  {PICK_DIAG.get('P')}\n"
+            f"  call candidates: {PICK_DIAG.get('C')}\n"
+            "  ('no_quote' = bid/ask missing or zero, usual before 9:30 am ET or on the free feed)")
 
     q = {s: chain[s] for s in (put["front"], put["back"], put["wing"], call["front"], call["back"], call["wing"])}
     debit_mid = (q[put["back"]].mid - q[put["front"]].mid) + (q[call["back"]].mid - q[call["front"]].mid)
@@ -338,6 +395,9 @@ def build_plan() -> dict:
     fees_pts = FEE_PER_LEG_CONTRACT * ROUND_TRIP_LEGS / 100.0
 
     def avg_iv(syms):
+        for s in syms:
+            if not q[s].iv:
+                option_delta(s, q[s], fwd)   # fills q[s].iv from the mid price
         ivs = [q[s].iv for s in syms if q[s].iv]
         return sum(ivs) / len(ivs) if ivs else None
 
@@ -461,6 +521,8 @@ def require_market_open() -> None:
 # Subcommands
 # --------------------------------------------------------------------------- #
 def cmd_check(args) -> None:
+    clock = trade_client.get_clock()
+    say(f"== Market: {'OPEN' if clock.is_open else 'CLOSED (quotes may be empty or stale; next open ' + str(clock.next_open) + ')'} ==")
     acct = trade_client.get_account()
     say("== Account ==")
     say(f"  options_approved_level={acct.options_approved_level} "
