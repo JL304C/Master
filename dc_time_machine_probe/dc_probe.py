@@ -2,19 +2,28 @@
 DC Time Machine -- Alpaca PAPER feasibility probe.
 
 Answers one question before anyone builds the full bot: can Alpaca carry the
-double-calendar -> iron-condor ("time machine") trade on SPXW end to end?
+double-calendar -> iron-condor ("time machine") trade end to end?
 See dc_time_machine_strategy.md next to this script for the strategy itself.
+
+Runs on SPY, not SPX. Alpaca rejects multi-leg orders whose European-style
+legs have different expirations (HTTP 422, code 42210000, seen 2026-10-05),
+which rules out both the calendar and the transformer on SPX/XSP as single
+orders. SPY options are American-style, so that rule doesn't apply -- but:
+  - early assignment is possible (low for ~35-delta OTM shorts, higher if
+    price runs through a short strike, esp. right before an ex-dividend date);
+  - SPY settles in shares, so the condor must be CLOSED on expiration day,
+    never left to expire (`status` warns when that day arrives);
+  - no Section 1256 60/40 tax treatment.
 
 Subcommands (run them in this order):
 
-  check      Read-only. Account options level, whether SPX/SPXW contracts and
-             chain snapshots (quotes, IV, greeks) come back, SPX estimated
-             from the chain, the expiration pair and ~35-delta strikes the
+  check      Read-only. Account options level, whether SPY contracts and
+             chain snapshots (quotes, IV, greeks) come back, the expiration pair and ~35-delta strikes the
              strategy would pick, the calendar's debit and the transformer's
              current credit vs. the risk-free minimum. Places no orders.
   open       Places ONE 1-lot double calendar as a single 4-leg order,
-             starting at mid and conceding $0.05/minute up to --max-slip.
-  transform  Submits the transformer (sell back-month longs, buy 5-wide
+             starting at mid and conceding $0.01/minute up to --max-slip.
+  transform  Submits the transformer (sell back-month longs, buy $1-wide
              front-month wings) as ONE 4-leg order at C_min = D + W + fees.
              THE KEY TEST: does Alpaca accept this order at all?
   status     Shows the probe's saved state, its open orders and positions.
@@ -64,26 +73,27 @@ from alpaca.trading.requests import (
 # --------------------------------------------------------------------------- #
 # Strategy parameters (spec sections 3 and 4).
 # --------------------------------------------------------------------------- #
-UNDERLYING = "SPX"
-ROOT = "SPXW"                # PM-settled weeklies
+UNDERLYING = "SPY"
+ROOT = "SPY"
 FRONT_DTE_MIN = 6            # front (short) expiration window
 FRONT_DTE_MAX = 15
 BACK_GAP_MIN = 1             # back expiration is 1-4 calendar days after front
 BACK_GAP_MAX = 4
 TARGET_DELTA = 0.35          # 30-40 delta short strikes
-WING = 5.0                   # W, wing width in index points
+WING = 1.0                   # W, wing width in dollars (SPY strikes are $1 apart)
 QTY = 1                      # probe size: one double calendar
 
-# Costs. Alpaca's own options commission is $0, but SPX carries exchange,
-# OCC and regulatory fees. 0.70/contract/leg is a deliberately conservative
-# placeholder -- replace it with what your paper/live fills actually show.
-FEE_PER_LEG_CONTRACT = 0.70
-ROUND_TRIP_LEGS = 8          # 4 to open the calendar + 4 to transform; the
-                             # condor cash-settles, so no closing fees
+# Costs. Alpaca's options commission is $0; what's left are small regulatory
+# and clearing fees (ORF, OCC, TAF on sells). 0.05/contract/leg is a
+# conservative placeholder -- replace it with what your fills actually show.
+FEE_PER_LEG_CONTRACT = 0.05
+ROUND_TRIP_LEGS = 12         # 4 to open the calendar + 4 to transform + 4 to
+                             # close the condor on expiration day (SPY settles
+                             # in shares, so it can't just expire like SPX)
 
-TICK = 0.05                  # price increment for SPX complex orders
-RATE = 0.04                  # risk-free rate, only used to back out SPX
-                             # from put-call parity and for fallback deltas
+TICK = 0.01                  # SPY options trade in pennies
+RATE = 0.04                  # risk-free rate, for put-call parity and
+                             # fallback deltas
 
 HERE = Path(__file__).resolve().parent
 STATE_FILE = HERE / "dc_probe_state.json"
@@ -147,7 +157,7 @@ def ceil_tick(x: float) -> float:
 
 
 def parse_occ(sym: str) -> dict:
-    """SPXW261016P06500000 -> root/expiration/right/strike."""
+    """SPY261016P00670000 -> root/expiration/right/strike."""
     i = 0
     while i < len(sym) and not sym[i].isdigit():
         i += 1
@@ -202,11 +212,9 @@ class Quote:
         return (self.bid + self.ask) / 2.0
 
 
-def rough_spot() -> float:
-    """SPY x 10 -- only used to bound the strike range we ask the chain for.
-    Alpaca has no index quotes, so the real SPX level comes from parity."""
-    q = stock_data.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols="SPY"))["SPY"]
-    return (float(q.bid_price) + float(q.ask_price)) / 2.0 * 10.0
+def spot_price() -> float:
+    q = stock_data.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=UNDERLYING))[UNDERLYING]
+    return (float(q.bid_price) + float(q.ask_price)) / 2.0
 
 
 def fetch_chain(underlying: str, exp_from: date, exp_to: date, lo: float, hi: float) -> dict[str, Quote]:
@@ -223,18 +231,13 @@ def fetch_chain(underlying: str, exp_from: date, exp_to: date, lo: float, hi: fl
 
 
 def get_chain(exp_from: date, exp_to: date, lo: float, hi: float) -> tuple[str, dict[str, Quote]]:
-    """Alpaca's docs don't say whether SPXW chains live under SPX or SPXW --
-    try both and report which one worked."""
-    errors = []
-    for underlying in (UNDERLYING, ROOT):
-        try:
-            chain = fetch_chain(underlying, exp_from, exp_to, lo, hi)
-            if chain:
-                return underlying, chain
-            errors.append(f"{underlying}: empty chain")
-        except Exception as e:
-            errors.append(f"{underlying}: {api_error_text(e)}")
-    raise RuntimeError("no SPXW option chain data: " + " | ".join(errors))
+    try:
+        chain = fetch_chain(UNDERLYING, exp_from, exp_to, lo, hi)
+    except Exception as e:
+        raise RuntimeError(f"no {UNDERLYING} option chain data: {api_error_text(e)}")
+    if not chain:
+        raise RuntimeError(f"no {UNDERLYING} option chain data: empty chain")
+    return UNDERLYING, chain
 
 
 def forward_from_parity(chain: dict[str, Quote], exp: date) -> float | None:
@@ -298,7 +301,9 @@ def black76_price(fwd: float, strike: float, t: float, iv: float, right: str) ->
 
 
 def implied_vol_from_mid(price: float, fwd: float, strike: float, t: float, right: str) -> float | None:
-    """Bisection on Black-76. Used when Alpaca's feed has no IV/greeks for SPXW."""
+    """Bisection on Black-76. Used when Alpaca's feed has no IV/greeks. Treats
+    the American SPY options as European, which is close enough for short-dated
+    OTM strikes."""
     if price <= 0:
         return None
     lo, hi = 0.01, 3.0
@@ -364,7 +369,7 @@ def pick_strike(chain: dict[str, Quote], front: date, back: date, right: str, fw
 def build_plan() -> dict:
     """Everything `check` reports and `open` needs, from one chain pull."""
     today = date.today()
-    spot0 = rough_spot()
+    spot0 = spot_price()
     underlying, chain = get_chain(
         today + timedelta(days=FRONT_DTE_MIN),
         today + timedelta(days=FRONT_DTE_MAX + BACK_GAP_MAX),
@@ -377,13 +382,13 @@ def build_plan() -> dict:
     front, back = pair
     fwd = forward_from_parity(chain, front)
     if fwd is None:
-        raise RuntimeError("could not back out SPX from put-call parity (no quoted call/put pairs)")
+        raise RuntimeError("could not compute the forward from put-call parity (no quoted call/put pairs)")
     put = pick_strike(chain, front, back, "P", fwd)
     call = pick_strike(chain, front, back, "C", fwd)
     if not put or not call:
         raise RuntimeError(
             "could not find ~35-delta strikes with back-month and wing contracts quoted.\n"
-            f"  front={front} back={back} SPX(parity)={fwd:.2f} chain contracts={len(chain)}\n"
+            f"  front={front} back={back} forward(parity)={fwd:.2f} chain contracts={len(chain)}\n"
             f"  put candidates:  {PICK_DIAG.get('P')}\n"
             f"  call candidates: {PICK_DIAG.get('C')}\n"
             "  ('no_quote' = bid/ask missing or zero, usual before 9:30 am ET or on the free feed)")
@@ -411,8 +416,8 @@ def build_plan() -> dict:
         "chain_contracts": len(chain),
         "chain_contracts_with_iv": quotes_with_iv,
         "chain_contracts_with_delta": quotes_with_delta,
-        "spy_x10": round(spot0, 2),
-        "spx_forward_from_parity": round(fwd, 2),
+        "spy_quote_mid": round(spot0, 2),
+        "forward_from_parity": round(fwd, 2),
         "front_expiration": front,
         "back_expiration": back,
         "put": put,
@@ -468,7 +473,7 @@ def net_fill_debit(order) -> float | None:
 
 
 def work_order(legs, qty: int, start_debit: float, max_slip: float, label: str):
-    """Submit at start_debit, then every minute cancel/resubmit $0.05 worse,
+    """Submit at start_debit, then every minute cancel/resubmit one tick ($0.01) worse,
     up to max_slip. Returns the filled order, or None (nothing left working)."""
     debit = round_tick(start_debit)
     limit = round_tick(start_debit + max_slip)
@@ -532,7 +537,7 @@ def cmd_check(args) -> None:
         say("  !! Multi-leg spreads need options level 3 -- raise it in the paper dashboard.")
 
     say("== Contract listing (trading API) ==")
-    for und in (UNDERLYING, ROOT):
+    for und in (UNDERLYING,):
         try:
             resp = trade_client.get_option_contracts(GetOptionContractsRequest(
                 underlying_symbols=[und], root_symbol=ROOT, status=AssetStatus.ACTIVE,
@@ -554,7 +559,7 @@ def cmd_check(args) -> None:
         f"sell {plan['front_expiration']} / buy {plan['back_expiration']}")
     say(f"  debit mid {plan['calendar_debit_mid']:.2f}, natural {plan['calendar_debit_natural']:.2f}")
     say(f"  risk-free credit needed if filled at mid: {plan['c_min_if_filled_at_mid']:.2f} "
-        f"(D + {WING:.0f} + fees {plan['fees_points']:.2f}); transformer worth {plan['transformer_credit_mid_now']:.2f} right now")
+        f"(D + {WING:.2f} + fees {plan['fees_points']:.2f}); transformer worth {plan['transformer_credit_mid_now']:.2f} right now")
     say(f"  IV ratio front/back: {plan['iv_ratio_front_over_back']}")
 
 
@@ -671,9 +676,14 @@ def cmd_status(args) -> None:
                 f"locked-in N = {state['transform_credit'] - state['debit']:.2f}")
     syms = probe_symbols(state)
     say("Positions:")
-    for pos in trade_client.get_all_positions():
+    positions = trade_client.get_all_positions()
+    for pos in positions:
         if not syms or pos.symbol in syms:
             say(f"  {pos.symbol} qty={pos.qty} avg={pos.avg_entry_price} mkt={pos.market_value} upl={pos.unrealized_pl}")
+    if any(p.symbol == UNDERLYING for p in positions):
+        say(f"!! You hold {UNDERLYING} shares -- likely an early assignment. Check the dashboard.")
+    if state.get("phase") in ("calendar", "condor") and str(state.get("front_expiration")) == date.today().isoformat():
+        say("!! Front expiration is TODAY. SPY settles in shares: run `close` before 3:45 pm ET.")
 
 
 def cmd_close(args) -> None:
@@ -736,16 +746,16 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("check", help="read-only data and selection check")
     o = sub.add_parser("open", help="open one 1-lot double calendar")
-    o.add_argument("--max-slip", type=float, default=0.50,
-                   help="max points to concede above mid while working the fill (default 0.50)")
+    o.add_argument("--max-slip", type=float, default=0.05,
+                   help="max dollars to concede above mid while working the fill (default 0.05)")
     t = sub.add_parser("transform", help="submit the transformer order at C_min")
     t.add_argument("--credit", type=float, help="override the credit (default: C_min from state)")
     t.add_argument("--allow-below-min", action="store_true", help="permit a credit below C_min")
     t.add_argument("--wait", type=float, default=0, help="minutes to watch for a fill (default: don't wait)")
     sub.add_parser("status", help="show state, transformer order and positions")
     c = sub.add_parser("close", help="close whatever the probe still holds")
-    c.add_argument("--max-slip", type=float, default=1.00,
-                   help="max points to concede past mid while closing (default 1.00)")
+    c.add_argument("--max-slip", type=float, default=0.15,
+                   help="max dollars to concede past mid while closing (default 0.15)")
     args = ap.parse_args()
     {"check": cmd_check, "open": cmd_open, "transform": cmd_transform,
      "status": cmd_status, "close": cmd_close}[args.cmd](args)
