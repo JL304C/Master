@@ -3,3 +3,5 @@
 __pycache__/
 gpc_wheel_bot/gpc_wheel_log.jsonl
 gpc_wheel_bot/gpc_wheel_trades.csv
+dc_time_machine_probe/dc_probe_log.jsonl
+dc_time_machine_probe/dc_probe_state.json
