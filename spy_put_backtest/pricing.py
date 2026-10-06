@@ -14,11 +14,14 @@ import numpy as np
 from scipy.special import ndtr as norm_cdf
 
 
-def fit_forward(strikes, call_mid, put_mid, ref_price=None, band=0.05, min_points=3):
+def fit_forward(strikes, call_mid, put_mid, ref_price=None, band=0.02, min_points=3):
     """Least-squares fit of C - P = a + b*K, giving DF = -b and F = a/DF.
 
-    Uses strikes within +/-band of ref_price (or of the median strike if no
-    ref_price). Returns (F, DF) or (None, None) if the fit is unusable.
+    Uses strikes within +/-band of ref_price (or of the strike where C - P is
+    closest to zero). The band is kept narrow because SPY options are American:
+    deep in-the-money puts trade at or above intrinsic value, which steepens the
+    line and pushes the fitted DF above 1. A DF a little above 1 is clipped to 1.
+    Returns (F, DF) or (None, None) if the fit is unusable.
     """
     K = np.asarray(strikes, dtype=float)
     y = np.asarray(call_mid, dtype=float) - np.asarray(put_mid, dtype=float)
@@ -34,10 +37,24 @@ def fit_forward(strikes, call_mid, put_mid, ref_price=None, band=0.05, min_point
         sel[np.argsort(np.abs(K - center))[:min_points]] = True
     b, a = np.polyfit(K[sel], y[sel], 1)
     df = -b
-    if not (0.85 < df <= 1.0005):
+    if not (0.80 < df <= 1.01):
         return None, None
     df = min(df, 1.0)
     return a / df, df
+
+
+def atm_parity_price(strikes, call_mid, put_mid, n=3):
+    """K + C - P averaged (median) over the n strikes where |C - P| is smallest.
+    Near the money, early exercise is worth ~nothing, so this is the forward
+    (for a short expiry, the spot) up to a discount factor ~1."""
+    K = np.asarray(strikes, dtype=float)
+    y = np.asarray(call_mid, dtype=float) - np.asarray(put_mid, dtype=float)
+    ok = np.isfinite(K) & np.isfinite(y)
+    K, y = K[ok], y[ok]
+    if len(K) == 0:
+        return None
+    idx = np.argsort(np.abs(y))[:n]
+    return float(np.median(K[idx] + y[idx]))
 
 
 def black76_put(F, K, T, DF, sigma):

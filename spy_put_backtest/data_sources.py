@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from pricing import fit_forward
+from pricing import atm_parity_price, fit_forward
 
 HERE = Path(__file__).resolve().parent
 ROOT = "SPY"
@@ -93,25 +93,36 @@ def last_quotes(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def spot_from_chain(chain, d):
-    """SPY close ~ parity forward of the nearest expiry >= 1 day out."""
+    """SPY close ~ K + C - P at the money, on the nearest expiry >= 1 day out."""
     q = chain[(chain["bid"] > 0) & np.isfinite(chain["ask"])]
     for exp in sorted(e for e in q["expiration"].unique() if (e - d).days >= 1):
-        F, DF = forward_for_expiry(q, exp, None)
-        if F:
-            return F
+        K, cm, pm = paired_mids(q, exp)
+        if len(K) >= 3:
+            return atm_parity_price(K, cm, pm)
     return None
 
 
-def forward_for_expiry(q, exp, ref):
+def paired_mids(q, exp):
+    """Strikes quoted on both sides at this expiry, with call and put mids."""
     sub = q[q["expiration"] == exp]
     calls = sub[sub["right"] == "C"].drop_duplicates("strike").set_index("strike")
     puts = sub[sub["right"] == "P"].drop_duplicates("strike").set_index("strike")
     common = calls.index.intersection(puts.index)
-    if len(common) < 3:
-        return None, None
     cm = (calls.loc[common, "bid"] + calls.loc[common, "ask"]) / 2
     pm = (puts.loc[common, "bid"] + puts.loc[common, "ask"]) / 2
-    return fit_forward(common.values, cm.values, pm.values, ref_price=ref)
+    return common.values, cm.values, pm.values
+
+
+def forward_for_expiry(q, exp, ref):
+    """(F, DF, note) for one expiry: the parity line fit near the money, or if that
+    fails, the at-the-money K + C - P with DF = 1."""
+    K, cm, pm = paired_mids(q, exp)
+    if len(K) < 3:
+        return None, None, ""
+    F, DF = fit_forward(K, cm, pm, ref_price=ref)
+    if F is not None:
+        return F, DF, ""
+    return atm_parity_price(K, cm, pm), 1.0, "parity line fit failed; used ATM K+C-P forward, DF=1"
 
 
 def trim_chain(chain, d, spot):
@@ -244,9 +255,10 @@ class DatabentoSource:
             chain = chain[(chain["root"] == ROOT) & chain["expiration"].notna()].drop(columns="root")
             spot = spot_from_chain(chain, d)
             if spot is None:
-                self.log(f"{d}: entry chain unusable ({len(chain)} contracts), not cached")
-                return None
-            chain = trim_chain(chain, d, spot)
+                # keep it anyway (untrimmed) so a re-run doesn't pay for it again
+                self.log(f"{d}: no SPY price from the chain ({len(chain)} contracts); cached untrimmed")
+            else:
+                chain = trim_chain(chain, d, spot)
             chain.to_parquet(path, index=False)
         self._expiries = sorted(chain["expiration"].unique())
         s = spot_from_chain(chain, d)

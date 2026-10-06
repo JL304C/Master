@@ -81,10 +81,9 @@ def select_entry(chain, d, spot, p: Params):
     dte = (exp - d).days
     T = dte / 365.0
     q = chain[(chain["bid"] > 0) & np.isfinite(chain["ask"])]
-    F, DF = forward_for_expiry(q, exp, spot)
-    note = ""
+    F, DF, note = forward_for_expiry(q, exp, spot)
     if F is None:
-        F, DF, note = spot, 1.0, "parity fit failed; used spot as forward, DF=1"
+        F, DF, note = spot, 1.0, "no call/put pairs at expiry; used spot as forward, DF=1"
     puts = q[(q["expiration"] == exp) & (q["right"] == "P")].copy()
     if puts.empty:
         return None, f"no quoted puts for {exp}"

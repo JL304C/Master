@@ -42,6 +42,42 @@ def test_parity_fit_recovers_rates():
     assert F == pytest.approx(S * math.exp((synthetic.R - synthetic.Q) * T), abs=1e-4)
 
 
+def _american_chain(d, S, r=0.043, q=0.012, seed=1):
+    """Chain shaped like real SPY quotes: American floor on ITM options, widening spreads."""
+    import datetime as dt
+    rng = np.random.default_rng(seed)
+    rows = []
+    for dte in (1, 2, 4, 9, 30, 88, 95):
+        e = d + dt.timedelta(days=dte)
+        T = dte / 365
+        F, DF = S * math.exp((r - q) * T), math.exp(-r * T)
+        for K in np.arange(round(S * 0.9), round(S * 1.1) + 1, 1.0):
+            sig = 0.16 * (1 - 1.5 * math.log(K / S))
+            p = float(black76_put(F, K, T, DF, sig))
+            c = p + DF * (F - K)
+            p, c = max(p, K - S), max(c, S - K)          # American: never below intrinsic
+            for right, v in (("P", p), ("C", c)):
+                half = 0.01 + 0.004 * v
+                mid = v + rng.normal(0, half / 3)
+                if mid - half > 0:
+                    rows.append((e, right, float(K), round(mid - half, 2), round(mid + half, 2)))
+    return pd.DataFrame(rows, columns=["expiration", "right", "strike", "bid", "ask"])
+
+
+def test_spot_and_forward_with_american_quotes():
+    """Real SPY chains broke the old parity fit (deep ITM puts at intrinsic -> fitted DF > 1)."""
+    import datetime as dt
+    from data_sources import forward_for_expiry, spot_from_chain
+    d, S = dt.date(2025, 4, 14), 539.12
+    for seed in range(5):
+        ch = _american_chain(d, S, seed=seed)
+        assert spot_from_chain(ch, d) == pytest.approx(S, rel=0.0015)
+        exp = d + dt.timedelta(days=88)
+        F, DF, note = forward_for_expiry(ch, exp, S)
+        assert F == pytest.approx(S * math.exp(0.031 * 88 / 365), rel=0.003)
+        assert 0.98 < DF <= 1.0
+
+
 def test_entry_days_shift_for_monday_holidays():
     import exchange_calendars as xcals
     s = [x.date() for x in xcals.get_calendar("XNYS").sessions_in_range("2024-01-01", "2024-01-31")]
