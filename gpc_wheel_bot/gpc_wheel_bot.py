@@ -1,14 +1,26 @@
 """
 GPC cash-secured wheel — scheduled paper-trading bot for Alpaca.
 
-Implements exactly the strategy audited earlier:
+Implements the strategy audited earlier, plus two real-world additions made
+2026-10-06 after live paper trading surfaced a gap the audit didn't cover
+(GPC is calm enough that a 20%-OTM, 30-DTE put can bid a nickel while still
+carrying the strike's full ~$10k+ of risk):
   - Sell 1 cash-secured put, ~30 DTE, ~20% OTM, only if strike*100 fits under
-    the $26,000 cap and available cash.
-  - If assigned: hold 100 shares, sell 1 covered call, ~30 DTE, ~10% OTM.
-  - At <=5 days to expiry, if the call is still OTM, roll it: buy to close,
-    sell a new ~30 DTE call at max(10% OTM from current price, cost basis) --
-    the cost-basis floor from the audit, so we never voluntarily lock in a
-    loss on the shares.
+    the $26,000 cap and available cash, AND the live bid is >= MIN_PREMIUM
+    ($0.50) -- otherwise skip, don't take a near-worthless premium against
+    full-size risk.
+  - If assigned: hold 100 shares, sell 1 covered call, ~30 DTE, ~10% OTM,
+    same MIN_PREMIUM floor (skipping just leaves shares uncovered for a day,
+    not dangerous, just un-optimized -- retried next run).
+  - At <=5 days to expiry, if the call is still OTM, roll it: buy to close
+    (market order -- closing existing risk isn't gated by premium or limit-
+    priced the way new risk is), sell a new ~30 DTE call at max(10% OTM from
+    current price, cost basis) -- the cost-basis floor from the audit, so we
+    never voluntarily lock in a loss on the shares -- same MIN_PREMIUM floor.
+  - Every sell-to-open order (new put, new call, rolled call) is now a LIMIT
+    order at the live quote's midpoint, not a market order -- a market sell
+    fills at whatever the current best bid is, which can be far worse than
+    the midpoint on a thin book.
   - Once shares are called away, restart with a new put.
 
 Derives all state fresh from Alpaca's own account each run (positions' own
@@ -37,6 +49,7 @@ from pathlib import Path
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
     MarketOrderRequest,
+    LimitOrderRequest,
     GetOptionContractsRequest,
     GetOrdersRequest,
     ClosePositionRequest,
@@ -50,7 +63,8 @@ from alpaca.trading.enums import (
     QueryOrderStatus,
 )
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockLatestQuoteRequest
+from alpaca.data.historical.option import OptionHistoricalDataClient
+from alpaca.data.requests import StockLatestQuoteRequest, OptionLatestQuoteRequest
 
 # --------------------------------------------------------------------------- #
 # Strategy parameters -- exactly what was audited. Change these and you are
@@ -64,6 +78,12 @@ DTE_TARGET = 30              # target days to expiration when opening
 ROLL_TRIGGER_DAYS = 5        # roll the call when this many days remain
 STRIKE_INCREMENT = 5.0       # GPC trades in $5 strike increments in practice;
                               # adjust if the real chain uses a different increment
+MIN_PREMIUM = 0.50           # skip selling any option quoting a bid below this
+                              # ($50/contract) -- added 2026-10-06. Not in the
+                              # original audited strategy: GPC is calm enough
+                              # that a 20%-OTM, 30-DTE put can bid a nickel while
+                              # still carrying strike*100 (~$10k+) of risk behind
+                              # it -- not worth taking regardless of win rate.
 
 HERE = Path(__file__).resolve().parent
 LOG_JSONL = HERE / "gpc_wheel_log.jsonl"
@@ -94,6 +114,7 @@ if not API_KEY or not SECRET_KEY:
 # live decision gets made.
 trade_client = TradingClient(API_KEY, SECRET_KEY, paper=True)
 data_client = StockHistoricalDataClient(API_KEY, SECRET_KEY)
+option_data_client = OptionHistoricalDataClient(API_KEY, SECRET_KEY)
 
 
 def log(event: dict) -> None:
@@ -199,13 +220,45 @@ def find_contract(right: ContractType, target_strike: float, dte_target: int):
     return contracts[0]
 
 
+def get_option_quote(symbol: str):
+    """Returns (bid, ask) for an option symbol, or (None, None) if no live
+    quote is available. Used before any sell-to-open order, added 2026-10-06
+    alongside MIN_PREMIUM -- the strategy previously sold blind, with no
+    look at the actual quote before submitting a market order."""
+    req = OptionLatestQuoteRequest(symbol_or_symbols=symbol)
+    quote = option_data_client.get_option_latest_quote(req).get(symbol)
+    if quote is None or quote.bid_price is None or quote.ask_price is None:
+        return None, None
+    if quote.bid_price <= 0 or quote.ask_price <= 0:
+        return None, None
+    return float(quote.bid_price), float(quote.ask_price)
+
+
 def submit_single_leg(symbol: str, side: OrderSide, qty: int = 1):
+    """Market order -- used only for the roll's buy-to-close leg, which is
+    closing existing risk, not opening new risk, so it isn't gated by
+    MIN_PREMIUM or priced at a limit the way sell-to-open orders now are."""
     req = MarketOrderRequest(
         symbol=symbol,
         qty=qty,
         side=side,
         type=OrderType.MARKET,
         time_in_force=TimeInForce.DAY,
+    )
+    return trade_client.submit_order(req)
+
+
+def submit_sell_limit(symbol: str, limit_price: float, qty: int = 1):
+    """Limit sell at the live quote's midpoint -- added 2026-10-06. Replaces
+    a bare market sell order, which fills at whatever the current best bid
+    is; on a thin book that can be far worse than the midpoint."""
+    req = LimitOrderRequest(
+        symbol=symbol,
+        qty=qty,
+        side=OrderSide.SELL,
+        type=OrderType.LIMIT,
+        time_in_force=TimeInForce.DAY,
+        limit_price=round(limit_price, 2),
     )
     return trade_client.submit_order(req)
 
@@ -236,9 +289,18 @@ def run():
         if contract is None:
             log({"action": "skip_put", "symbol": SYMBOL, "reason": "no suitable contract found in chain"})
             return
-        order = submit_single_leg(contract.symbol, OrderSide.SELL)
+        bid, ask = get_option_quote(contract.symbol)
+        if bid is None:
+            log({"action": "skip_put", "symbol": contract.symbol, "reason": "no live quote available, not trading blind"})
+            return
+        if bid < MIN_PREMIUM:
+            log({"action": "skip_put", "symbol": contract.symbol,
+                 "reason": f"bid ${bid:.2f} below the ${MIN_PREMIUM:.2f} minimum premium -- not worth the ${target_strike*100:,.0f} at risk"})
+            return
+        limit_price = (bid + ask) / 2.0
+        order = submit_sell_limit(contract.symbol, limit_price)
         log({"action": "sell_put", "symbol": contract.symbol, "qty": 1,
-             "reason": f"strike={contract.strike_price} exp={contract.expiration_date} order_id={order.id}"})
+             "reason": f"strike={contract.strike_price} exp={contract.expiration_date} bid={bid:.2f} ask={ask:.2f} limit={limit_price:.2f} order_id={order.id}"})
         return
 
     # ---- Short put open, not yet resolved: nothing to do ------------------
@@ -255,9 +317,18 @@ def run():
         if contract is None:
             log({"action": "skip_call", "symbol": SYMBOL, "reason": "no suitable contract found in chain"})
             return
-        order = submit_single_leg(contract.symbol, OrderSide.SELL)
+        bid, ask = get_option_quote(contract.symbol)
+        if bid is None:
+            log({"action": "skip_call", "symbol": contract.symbol, "reason": "no live quote available, not trading blind"})
+            return
+        if bid < MIN_PREMIUM:
+            log({"action": "skip_call", "symbol": contract.symbol,
+                 "reason": f"bid ${bid:.2f} below the ${MIN_PREMIUM:.2f} minimum premium -- shares stay uncovered, try again next run"})
+            return
+        limit_price = (bid + ask) / 2.0
+        order = submit_sell_limit(contract.symbol, limit_price)
         log({"action": "sell_call", "symbol": contract.symbol, "qty": 1,
-             "reason": f"strike={contract.strike_price} exp={contract.expiration_date} order_id={order.id}"})
+             "reason": f"strike={contract.strike_price} exp={contract.expiration_date} bid={bid:.2f} ask={ask:.2f} limit={limit_price:.2f} order_id={order.id}"})
         return
 
     # ---- Shares + open covered call: check roll/assignment -----------------
@@ -283,9 +354,20 @@ def run():
         if new_contract is None:
             log({"action": "alert", "symbol": SYMBOL, "reason": "closed old call but found no new contract to roll into -- shares now uncovered, check manually"})
             return
-        open_order = submit_single_leg(new_contract.symbol, OrderSide.SELL)
+        bid, ask = get_option_quote(new_contract.symbol)
+        if bid is None:
+            log({"action": "skip_roll", "symbol": new_contract.symbol,
+                 "reason": "closed old call but no live quote for the new one -- shares uncovered, will retry next run"})
+            return
+        if bid < MIN_PREMIUM:
+            log({"action": "skip_roll", "symbol": new_contract.symbol,
+                 "reason": f"closed old call but new strike's bid ${bid:.2f} is below the ${MIN_PREMIUM:.2f} minimum -- shares uncovered, will retry next run"})
+            return
+        limit_price = (bid + ask) / 2.0
+        open_order = submit_sell_limit(new_contract.symbol, limit_price)
         log({"action": "roll_call", "symbol": new_contract.symbol, "qty": 1,
-             "reason": f"strike={new_contract.strike_price} exp={new_contract.expiration_date} cost_basis_floor={cost_basis} order_id={open_order.id}"})
+             "reason": f"strike={new_contract.strike_price} exp={new_contract.expiration_date} cost_basis_floor={cost_basis} "
+                       f"bid={bid:.2f} ask={ask:.2f} limit={limit_price:.2f} order_id={open_order.id}"})
         return
 
     log({"action": "alert", "symbol": SYMBOL, "reason": f"unhandled state: shares={share_qty} option={option_pos}"})
