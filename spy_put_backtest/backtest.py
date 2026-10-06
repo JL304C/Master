@@ -411,8 +411,9 @@ def main():
         if not args.offline:
             ents = sorted(entry_days(sessions))
             total, detail = source.estimate_cost(ents, sessions)
-            print(f"Databento estimate: ~${total:,.2f}  ({detail})")
-            if total > 0 and not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
+            print(f"Databento estimate: ~${total:,.2f}  ({detail})" if total is not None
+                  else f"No cost estimate: {detail}")
+            if total != 0 and not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
                 raise SystemExit("Stopped before downloading.")
 
     results = {}

@@ -182,6 +182,29 @@ def test_databento_source_matches_full_chain(synth_dir, tmp_path):
     src.set_sessions(closes)
     total, _ = src.estimate_cost(sorted(bt.entry_days(sessions)), sessions)
     assert total > 0
+
+    # a gateway timeout on the estimate is retried, then reported instead of crashing
+    calls = []
+
+    def flaky(**kw):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("504 The remote gateway timed out.")
+        return 0.01
+    fake.metadata.get_cost = flaky
+    import data_sources
+    data_sources._time.sleep, real_sleep = (lambda s: None), data_sources._time.sleep
+    try:
+        total2, _ = src.estimate_cost(sorted(bt.entry_days(sessions)), sessions)
+        assert total2 == pytest.approx(total)
+
+        def down(**kw):
+            raise RuntimeError("504 The remote gateway timed out.")
+        fake.metadata.get_cost = down
+        total3, why = src.estimate_cost(sorted(bt.entry_days(sessions)), sessions)
+        assert total3 is None and "504" in why
+    finally:
+        data_sources._time.sleep = real_sleep
     got, got_eq, skipped = bt.run(src, start, end, bt.Params())
     assert len(skipped) == 0
     cols = ["entry_date", "strike", "expiry", "credit", "exit_date", "exit_reason", "exit_price", "pnl"]

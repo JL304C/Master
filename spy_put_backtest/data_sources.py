@@ -323,25 +323,39 @@ class DatabentoSource:
         return self._spot.get(d)
 
     # ---- cost
+    def _cost(self, symbols, stype_in, start, end, tries=4):
+        """metadata.get_cost with retries (Databento's gateway sometimes answers 504)."""
+        for attempt in range(tries):
+            try:
+                return self.client().metadata.get_cost(dataset=DATASET, schema=SCHEMA, symbols=symbols,
+                                                       stype_in=stype_in, start=start, end=end)
+            except Exception as exc:  # noqa: BLE001
+                if attempt == tries - 1:
+                    raise
+                self.log(f"  (cost estimate: {str(exc).splitlines()[0][:80]}; retrying)")
+                _time.sleep(2 ** (attempt + 1))
+
     def estimate_cost(self, entry_days, other_days, samples=6):
         """Databento's price for the uncached entry-day chains (sampled), plus a rough
-        figure for the small per-day contract requests."""
+        figure for the small per-day contract requests. Returns (None, reason) if
+        Databento can't give an estimate right now."""
         todo = [d for d in entry_days if not (self.cache / "chains" / f"{d}.parquet").exists()]
         todo_q = [d for d in other_days if not (self.cache / "quotes" / f"{d}.parquet").exists()]
         if not todo and not todo_q:
             return 0.0, "everything is cached"
         pick = todo[:: max(1, len(todo) // samples)][:samples] or entry_days[-samples:]
-        costs = []
-        for d in pick:
-            start, end = self.window(d, CHAIN_WINDOW_MIN)
-            costs.append(self.client().metadata.get_cost(dataset=DATASET, schema=SCHEMA, symbols=[f"{ROOT}.OPT"],
-                                                         stype_in="parent", start=start, end=end))
-        chain_each = float(np.mean(costs))
-        # one day's contract request is ~20 symbols x 15 minutes; size it from a real sample
-        d = pick[-1]
-        start, end = self.window(d, QUOTE_WINDOW_MIN)
-        whole = self.client().metadata.get_cost(dataset=DATASET, schema=SCHEMA, symbols=[f"{ROOT}.OPT"],
-                                                stype_in="parent", start=start, end=end)
+        try:
+            costs = []
+            for d in pick:
+                start, end = self.window(d, CHAIN_WINDOW_MIN)
+                costs.append(self._cost([f"{ROOT}.OPT"], "parent", start, end))
+            chain_each = float(np.mean(costs))
+            # one day's contract request is ~20 symbols x 15 minutes; size it from a real sample
+            start, end = self.window(pick[-1], QUOTE_WINDOW_MIN)
+            whole = self._cost([f"{ROOT}.OPT"], "parent", start, end)
+        except Exception as exc:  # noqa: BLE001
+            return None, (f"Databento didn't return a cost estimate ({str(exc).splitlines()[0][:80]}). "
+                          f"{len(todo)} entry-day chains and {len(todo_q)} days of contract quotes to download")
         quote_each = whole * 20 / 8000.0       # ~8k+ SPY contracts listed; ~20 requested
         total = chain_each * len(todo) + quote_each * len(todo_q)
         detail = (f"{len(todo)} entry-day chains x ~${chain_each:.4f} + {len(todo_q)} days of contract quotes "
