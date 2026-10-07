@@ -9,7 +9,10 @@ Rules
 - 1 contract per entry; positions overlap.
 - Exit, whichever first: put price <= 50% of credit (checked at each close,
   filled at that close's price), or the first close at <= 21 DTE.
-  No stop loss.
+  No stop loss by default. --stop-loss N adds one: close at the first close
+  where the put is >= N x the credit (a loss of about N-1 x the credit; a gap
+  through the level fills at the worse closing price). Several levels can be
+  compared in one run, e.g. --stop-loss none,2,3,4.
 
 Fill modes
 - mid:          enter at mid, exit at mid, mark open positions at mid.
@@ -44,6 +47,7 @@ class Params:
     exit_dte: int = 21
     commission: float = 1.00      # $ per contract per side
     fill_mode: str = "mid"        # "mid" or "conservative"
+    stop_loss: float = None       # close when price >= this multiple of credit (None = no stop)
 
 
 @dataclass
@@ -145,6 +149,8 @@ def run(source, start, end, p: Params, log=None):
             reason = None
             if np.isfinite(px) and px <= p.profit_target * pos.credit:
                 reason = "profit_target"
+            elif p.stop_loss and np.isfinite(px) and px >= p.stop_loss * pos.credit:
+                reason = "stop_loss"
             elif dte <= p.exit_dte:
                 if np.isfinite(px):
                     reason = "time_21dte"
@@ -235,6 +241,7 @@ def summarize(trades):
         profit_factor=round(wins.sum() / gross_loss, 2) if gross_loss > 0 else float("inf"),
         profit_target_exits=int((t["exit_reason"] == "profit_target").sum()),
         time_exits=int(t["exit_reason"].str.startswith("time").sum()),
+        stop_exits=int((t["exit_reason"] == "stop_loss").sum()),
         avg_days_held=round((pd.to_datetime(t["exit_date"]) - pd.to_datetime(t["entry_date"])).dt.days.mean(), 1),
     )
 
@@ -361,7 +368,7 @@ def _usd(v):
 def comparison_text(results):
     """Side-by-side table: full period and last 5 years for each fill mode, vs the source claim."""
     rows = [("", "trades", "win rate", "avg win", "avg loss", "worst", "total P&L", "per trade", "PF",
-             "max DD", "DD % peak BP", "peak BP")]
+             "max DD", "DD % peak BP", "peak BP", "stops")]
     for mode, r in results.items():
         for part in ("full", "recent"):
             x = r[part]
@@ -371,10 +378,11 @@ def comparison_text(results):
             rows.append((label, x["trades"], f"{x['win_rate']:.1%}", _usd(x['avg_win']), _usd(x['avg_loss']),
                          _usd(x['largest_loss']), _usd(x['total_pnl']), _usd(x['expectancy']),
                          f"{x['profit_factor']:.2f}", _usd(x.get('max_drawdown', 0)),
-                         f"{x.get('max_drawdown_pct_of_peak_bp') or 0:.0f}%", _usd(x.get('peak_buying_power', 0))))
+                         f"{x.get('max_drawdown_pct_of_peak_bp') or 0:.0f}%", _usd(x.get('peak_buying_power', 0)),
+                         x.get("stop_exits", 0)))
     c = SOURCE_CLAIM
     rows.append(("source claim (~5 yrs)", c["trades"], f"{c['win_rate']:.1%}", "", "", "", "",
-                 _usd(c['expectancy']), "", "", "", ""))
+                 _usd(c['expectancy']), "", "", "", "", ""))
     widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     lines = ["  ".join(str(v).rjust(w) if i else str(v).ljust(w) for i, (v, w) in enumerate(zip(r, widths)))
              for r in rows]
@@ -389,6 +397,8 @@ def main():
     ap.add_argument("--out", default=str(HERE / "results"))
     ap.add_argument("--commission", type=float, default=1.00, help="$ per contract per side")
     ap.add_argument("--modes", default="mid,conservative")
+    ap.add_argument("--stop-loss", default="none",
+                    help="close when the put is >= N x credit; comma list to compare, e.g. none,2,3,4")
     ap.add_argument("--data-dir", default=None, help="use local full-chain parquet files instead of Databento")
     ap.add_argument("--offline", action="store_true", help="Databento cache only, no downloads")
     ap.add_argument("--yes", action="store_true", help="skip the cost prompt")
@@ -405,7 +415,8 @@ def main():
             raise SystemExit(f"Missing DATABENTO_API_KEY. Looked in:\n  {where}\n"
                              f"Put DATABENTO_API_KEY=... in {HERE / '.env'}")
         source = DatabentoSource(offline=args.offline)
-        end = args.end or str((pd.Timestamp.today() - pd.offsets.BDay(2)).date())
+        end = args.end or (str(source.last_cached_day()) if args.offline and source.last_cached_day()
+                           else str((pd.Timestamp.today() - pd.offsets.BDay(2)).date()))
         sessions, closes = sessions_between(args.start, end)
         source.set_sessions(closes)
         if not args.offline:
@@ -416,14 +427,20 @@ def main():
             if total != 0 and not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
                 raise SystemExit("Stopped before downloading.")
 
+    stops = [None if x.strip().lower() in ("none", "0", "") else float(x) for x in args.stop_loss.split(",")]
     results = {}
     for mode in args.modes.split(","):
-        print(f"Running {mode} fills {args.start} .. {end}")
-        p = Params(commission=args.commission, fill_mode=mode)
-        trades, eq, skipped = run(source, args.start, end, p, log=print)
-        label = "mid fills" if mode == "mid" else "bid entry / ask exit"
-        results[mode] = report(trades, eq, skipped, Path(args.out) / mode, label)
-        print(json.dumps(results[mode], indent=2, default=str))
+        for stop in stops:
+            tag = f"stop{stop:g}x" if stop else ""
+            key = f"{mode} {tag}".strip()
+            print(f"Running {key} {args.start} .. {end}")
+            p = Params(commission=args.commission, fill_mode=mode, stop_loss=stop)
+            trades, eq, skipped = run(source, args.start, end, p, log=print)
+            label = ("mid fills" if mode == "mid" else "bid entry / ask exit") + \
+                    (f", stop at {stop:g}x credit" if stop else "")
+            out = Path(args.out) / (f"{mode}_{tag}" if stop else mode)
+            results[key] = report(trades, eq, skipped, out, label)
+            print(f"  -> {out}")
     (Path(args.out) / "summary_all.json").write_text(json.dumps(results, indent=2, default=str))
     text = comparison_text(results)
     (Path(args.out) / "report.txt").write_text(text)

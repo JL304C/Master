@@ -322,6 +322,10 @@ class DatabentoSource:
     def spot(self, d):
         return self._spot.get(d)
 
+    def last_cached_day(self):
+        days = [p.stem for sub in ("chains", "quotes") for p in (self.cache / sub).glob("*.parquet")]
+        return pd.Timestamp(max(days)).date() if days else None
+
     # ---- cost
     def _cost(self, symbols, stype_in, start, end, tries=4):
         """metadata.get_cost with retries (Databento's gateway sometimes answers 504)."""

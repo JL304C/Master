@@ -16,7 +16,7 @@ so the first real run happens on your laptop (same as `spy_double_calendar`).
 | Size | 1 contract per entry. A new one every week regardless of open positions (~10 overlapping) |
 | Profit target | Buy back at the first close where the put is ≤ 50% of the credit |
 | Time exit | Buy back at the first close at ≤ 21 days to expiry |
-| Stop loss | None |
+| Stop loss | None by default (as in the source). `--stop-loss 3` closes at the first close where the put is ≥ 3× the credit (≈ 2× credit loss); `--stop-loss none,2,3,4` compares levels |
 | Commission | $1.00 per contract per side (`--commission`) |
 
 Two fill models run on **the same contracts**:
@@ -62,6 +62,8 @@ python backtest.py                               # full run, 2013-04-01 to two t
 ```
 
 - The key is read from `DATABENTO_API_KEY` in a `.env` in this folder, or in any sibling folder (`spy_double_calendar/.env` works).
+- Stop-loss comparison on the data you already have (no downloads): `python backtest.py --offline --modes mid --stop-loss none,2,3,4`.
+  Each level gets its own folder (`results/mid_stop3x/` …) and a row in `results/report.txt`.
 - Options: `--commission 0.65`, `--start/--end`, `--modes mid` (one fill model), `--offline`, `--yes` (skip the cost prompt),
   `--data-dir <folder>` (local full-chain parquet files from another vendor instead of Databento).
 
@@ -81,6 +83,7 @@ python backtest.py                               # full run, 2013-04-01 to two t
 
 - **End-of-day only.** The profit target is checked at each close and filled at that close's price. A put that touches
   50% intraday and bounces back isn't taken, and a close well below 50% fills at that better price.
+- **Stops are checked at the close.** A put that gaps through its stop overnight is closed at that close's (worse) price; an intraday spike that reverses by the close doesn't trigger it.
 - **Missing quotes.** If a contract has no quote on a day, its last mark is carried forward (`stale_marks` in
   `equity_daily.csv`). If it has no quote on the 21-DTE day, it's closed at the next close that has one (noted in the trade log).
 - **Data quality.** Databento builds pre-2023-02-28 `cbbo-1m` from subsampled data, so very fast closes may be slightly stale.

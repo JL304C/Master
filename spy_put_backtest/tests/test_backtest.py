@@ -222,3 +222,28 @@ def test_databento_source_matches_full_chain(synth_dir, tmp_path):
     again, _, _ = bt.run(off, start, end, bt.Params())
     assert len(fake.calls) == n
     pd.testing.assert_frame_equal(got[cols], again[cols])
+
+
+def test_stop_loss(synth_dir):
+    base, base_eq, _ = bt.run(LocalChainSource(synth_dir), "2019-01-01", "2020-12-31", bt.Params())
+    t, eq, _ = bt.run(LocalChainSource(synth_dir), "2019-01-01", "2020-12-31", bt.Params(stop_loss=2.0))
+    closed = t[t.exit_reason != "open"]
+    stops = closed[closed.exit_reason == "stop_loss"]
+    assert len(stops) > 0
+    # stopped at the first close at/above 2x credit (fill can be worse after a gap, never better)
+    assert (stops.exit_price >= 2.0 * stops.credit - 1e-9).all()
+    # same entries as without the stop; only exits differ
+    assert list(t.entry_date) == list(base.entry_date) and list(t.strike) == list(base.strike)
+    assert closed.pnl.min() >= base[base.exit_reason != "open"].pnl.min()
+    s = bt.summarize(t)
+    assert s["stop_exits"] == len(stops)
+
+
+def test_cli_compares_stop_levels(synth_dir, tmp_path, monkeypatch, capsys):
+    out = tmp_path / "res"
+    monkeypatch.setattr(sys, "argv", ["backtest.py", "--data-dir", str(synth_dir), "--out", str(out),
+                                      "--modes", "mid", "--stop-loss", "none,3", "--end", "2019-12-31"])
+    bt.main()
+    text = (out / "report.txt").read_text()
+    assert "mid all" in text and "mid stop3x all" in text and "stops" in text
+    assert (out / "mid" / "trades.csv").exists() and (out / "mid_stop3x" / "trades.csv").exists()
