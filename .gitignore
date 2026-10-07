@@ -6,3 +6,5 @@ gpc_wheel_bot/gpc_wheel_trades.csv
 spy_put_backtest/cache/
 spy_put_backtest/results/
 spy_put_backtest/data/
+spy_put_bot/spy_put_log.jsonl
+spy_put_bot/spy_put_trades.csv
