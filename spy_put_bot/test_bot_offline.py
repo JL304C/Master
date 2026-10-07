@@ -156,12 +156,22 @@ def test_working_order_blocks_duplicate_close(log):
 def test_caps_and_dry_run(tmp_path):
     b = FakeBroker(MONDAY)
     log = bot.Log(tmp_path / "l.jsonl", tmp_path / "l.csv", echo=False)
-    for i in range(12):                                    # 12 puts ~ $700k secured
+    for i in range(13):                                    # 13 puts open -> position cap
         _held(b, log, f"SPY{MONDAY + timedelta(days=40 + i):%y%m%d}P00590000", 4.0)
         b.quote[b.pos[-1]["symbol"]] = (3.0, 3.1)
     bot.run(b, log, MONDAY)
     assert not [o for o in b.submitted if o["opening"]]
-    assert "cap" in log.events("skip_entry")[-1]["reason"]
+    assert "cap is 13" in log.events("skip_entry")[-1]["reason"]
+
+    # 12 puts at a $700 strike = $840k secured -> one more would pass the $850k cash cap
+    b3 = FakeBroker(MONDAY, price=780.0)
+    log3 = bot.Log(tmp_path / "c.jsonl", tmp_path / "c.csv", echo=False)
+    for i in range(12):
+        _held(b3, log3, f"SPY{MONDAY + timedelta(days=40 + i):%y%m%d}P00700000", 4.0)
+        b3.quote[b3.pos[-1]["symbol"]] = (3.0, 3.1)
+    bot.run(b3, log3, MONDAY)
+    assert not [o for o in b3.submitted if o["opening"]]
+    assert "cash secured" in log3.events("skip_entry")[-1]["reason"]
 
     dry = bot.Log(tmp_path / "d.jsonl", tmp_path / "d.csv", dry_run=True, echo=False)
     b2 = FakeBroker(MONDAY)

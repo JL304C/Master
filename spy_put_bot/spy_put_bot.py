@@ -17,7 +17,7 @@ with the 3x stop that came out best there and no VIX filter:
           An exit order that doesn't fill is re-checked the next day.
 
 Alpaca accounts can't sell naked options, so each put is cash-secured
-(strike x 100 held as cash, ~$58k at SPY ~$650). MAX_CASH_SECURED caps the total
+(strike x 100 held as cash, ~$69k at SPY ~$780). MAX_CASH_SECURED caps the total
 so other bots on the same account keep their cash.
 
 Shares the account safely with other bots (e.g. nvda_condor_bot.py): it only reads,
@@ -60,7 +60,7 @@ RETRY_THROUGH_WEEKDAY = 2     # a missed/unfilled entry is retried through Wedne
 ENTRY_CONCESSION = 0.02       # sell limit = mid - this (never below the bid)
 STOP_LIMIT_PAD = 0.10         # stop buy-back limit = ask + this, so it fills in a fast market
 MAX_OPEN_POSITIONS = 13       # backtest peaked at 11 open at once
-MAX_CASH_SECURED = 750_000.0  # cap on strike x 100 across this bot's open puts + new entry
+MAX_CASH_SECURED = 850_000.0  # cap on strike x 100 across open puts + new entry (~12 puts at SPY ~$780)
 MIN_BID = 0.05                # don't sell a put with no real bid
 MAX_SPREAD = (0.50, 0.30)     # skip an exit when ask - bid > max($0.50, 30% of mid): likely a bad quote
 

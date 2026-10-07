@@ -14,8 +14,8 @@ Paper-trades the strategy tested in `../spy_put_backtest` on 13 years of real SP
 Backtest, 2013–2026, bid/ask fills, 1 put a week: $48,918 total, 93.1% win rate, worst drawdown −$7,466.
 
 **Cash-secured.** Alpaca doesn't allow naked puts, so each put holds strike × 100 in cash
-(~$58k with SPY near $650). About 10 puts are open at a time, so expect **~$550–650k tied up**.
-`MAX_CASH_SECURED` ($750k) and `MAX_OPEN_POSITIONS` (13) cap it so other bots on the account keep their cash.
+(~$69k with SPY near $780). About 10 puts are open at a time, so expect **~$650–750k tied up**.
+`MAX_CASH_SECURED` ($850k) and `MAX_OPEN_POSITIONS` (13) cap it so other bots on the account keep their cash.
 
 **Safe to share an account.** The bot only reads, manages and closes SPY options it opened,
 as recorded in its own log `spy_put_log.jsonl` (don't delete it). It never closes, cancels or
