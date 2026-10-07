@@ -52,7 +52,8 @@ sizes anything account-wide. `nvda_condor_bot.py` works the same way, so the two
 ## What it writes
 
 - `spy_put_log.jsonl`: every decision, with prices and order IDs. **The bot's memory: keep it.**
-- `spy_put_trades.csv`: the same, one line per decision, for a quick look in Notepad.
+- `spy_put_trades.csv`: the same, one line per decision, for a quick look. Open it in **Notepad**, or close
+  Excel before 3:45 PM: Excel locks the file (the bot then skips the CSV and keeps the JSONL log).
 - Rejected orders and crashes are logged too (`alert` / `error` lines), since the console window
   closes too fast to read under Task Scheduler.
 

@@ -117,13 +117,16 @@ class Log:
         event = {"ts": datetime.now(timezone.utc).isoformat(), "dry_run": self.dry_run, **event}
         with self.jsonl.open("a") as fh:
             fh.write(json.dumps(event, default=str) + "\n")
-        is_new = not self.csv.exists()
-        with self.csv.open("a", newline="") as fh:
-            w = csv.writer(fh)
-            if is_new:
-                w.writerow(["timestamp", "dry_run", "action", "symbol", "qty", "limit", "reason"])
-            w.writerow([event["ts"], self.dry_run, event.get("action", ""), event.get("symbol", ""),
-                        event.get("qty", ""), event.get("limit", ""), event.get("reason", "")])
+        try:                       # the CSV is a convenience copy; Excel locks it while open
+            is_new = not self.csv.exists()
+            with self.csv.open("a", newline="") as fh:
+                w = csv.writer(fh)
+                if is_new:
+                    w.writerow(["timestamp", "dry_run", "action", "symbol", "qty", "limit", "reason"])
+                w.writerow([event["ts"], self.dry_run, event.get("action", ""), event.get("symbol", ""),
+                            event.get("qty", ""), event.get("limit", ""), event.get("reason", "")])
+        except OSError as exc:
+            print(f"(could not write {self.csv.name}: {exc} -- close it in Excel; spy_put_log.jsonl has everything)")
         if self.echo:
             print(json.dumps(event, indent=2, default=str))
         return event

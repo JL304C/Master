@@ -226,3 +226,17 @@ def test_main_logs_missing_keys(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         bot.main()
     assert "Missing ALPACA_API_KEY" in (tmp_path / "l.jsonl").read_text()
+
+
+def test_locked_csv_does_not_stop_the_bot(tmp_path, monkeypatch):
+    log = bot.Log(tmp_path / "l.jsonl", tmp_path / "l.csv", echo=False)
+    real_open = type(log.csv).open
+
+    def locked(self, *a, **k):
+        if self.name == "l.csv":
+            raise PermissionError("[Errno 13] Permission denied (open in Excel)")
+        return real_open(self, *a, **k)
+    monkeypatch.setattr(type(log.csv), "open", locked)
+    b = FakeBroker(MONDAY)
+    bot.run(b, log, MONDAY)
+    assert len(b.submitted) == 1 and log.events("open_put")      # traded and logged to the JSONL
