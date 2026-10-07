@@ -13,6 +13,9 @@ Rules
   where the put is >= N x the credit (a loss of about N-1 x the credit; a gap
   through the level fills at the worse closing price). Several levels can be
   compared in one run, e.g. --stop-loss none,2,3,4.
+- Optional VIX filter (--vix-max N): skip a week's new entry when the
+  previous trading day's VIX close is above N. Open positions are still
+  managed as usual. Levels can be compared, e.g. --vix-max none,20,25,30.
 
 Fill modes
 - mid:          enter at mid, exit at mid, mark open positions at mid.
@@ -33,7 +36,7 @@ import exchange_calendars as xcals
 import numpy as np
 import pandas as pd
 
-from data_sources import DatabentoSource, LocalChainSource, forward_for_expiry, load_env
+from data_sources import DatabentoSource, LocalChainSource, forward_for_expiry, load_env, load_vix
 from pricing import implied_vol_put, put_delta, regt_naked_put_bp
 
 HERE = Path(__file__).parent
@@ -48,6 +51,7 @@ class Params:
     commission: float = 1.00      # $ per contract per side
     fill_mode: str = "mid"        # "mid" or "conservative"
     stop_loss: float = None       # close when price >= this multiple of credit (None = no stop)
+    vix_max: float = None         # skip new entries when the prior day's VIX close is above this
 
 
 @dataclass
@@ -119,8 +123,9 @@ def sessions_between(start, end):
     return [x.date() for x in ss], {x.date(): c for x, c in zip(ss, cal.closes[ss])}
 
 
-def run(source, start, end, p: Params, log=None):
+def run(source, start, end, p: Params, log=None, vix=None):
     sessions, _ = sessions_between(start, end)
+    vix_dates = sorted(vix) if vix else []
     entries = entry_days(sessions)
     open_pos, closed, skipped, daily = [], [], [], []
     realized = 0.0
@@ -165,8 +170,14 @@ def run(source, start, end, p: Params, log=None):
         open_pos = still_open
 
         # 2) new entry
+        vix_prev = None
+        if d in entries and p.vix_max and vix_dates:
+            i = np.searchsorted(vix_dates, d) - 1
+            vix_prev = vix[vix_dates[i]] if i >= 0 else None
         if d in entries:
-            if chain is None or chain.empty:
+            if vix_prev is not None and vix_prev > p.vix_max:
+                skipped.append(dict(date=d, reason=f"VIX filter: prior close {vix_prev:.2f} > {p.vix_max:g}"))
+            elif chain is None or chain.empty:
                 skipped.append(dict(date=d, reason="no chain data"))
             elif spot is None:
                 skipped.append(dict(date=d, reason="could not estimate spot"))
@@ -353,6 +364,9 @@ def report(trades, eq, skipped, out, title, recent_years=5):
         open_positions_at_end=int((trades["exit_reason"] == "open").sum()) if len(trades) else 0,
         skipped_entries=int(len(skipped)),
     )
+    vix_sk = skipped[skipped["reason"].astype(str).str.startswith("VIX")] if len(skipped) else skipped
+    summary["full"]["vix_skips"] = int(len(vix_sk))
+    summary["recent"]["vix_skips"] = int((pd.to_datetime(vix_sk["date"]).dt.date >= cutoff).sum()) if len(vix_sk) else 0
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     charts(trades, eq, out, title)
     return summary
@@ -368,7 +382,7 @@ def _usd(v):
 def comparison_text(results):
     """Side-by-side table: full period and last 5 years for each fill mode, vs the source claim."""
     rows = [("", "trades", "win rate", "avg win", "avg loss", "worst", "total P&L", "per trade", "PF",
-             "max DD", "DD % peak BP", "peak BP", "stops")]
+             "max DD", "DD % peak BP", "peak BP", "stops", "VIX skips")]
     for mode, r in results.items():
         for part in ("full", "recent"):
             x = r[part]
@@ -379,10 +393,10 @@ def comparison_text(results):
                          _usd(x['largest_loss']), _usd(x['total_pnl']), _usd(x['expectancy']),
                          f"{x['profit_factor']:.2f}", _usd(x.get('max_drawdown', 0)),
                          f"{x.get('max_drawdown_pct_of_peak_bp') or 0:.0f}%", _usd(x.get('peak_buying_power', 0)),
-                         x.get("stop_exits", 0)))
+                         x.get("stop_exits", 0), x.get("vix_skips", 0)))
     c = SOURCE_CLAIM
     rows.append(("source claim (~5 yrs)", c["trades"], f"{c['win_rate']:.1%}", "", "", "", "",
-                 _usd(c['expectancy']), "", "", "", "", ""))
+                 _usd(c['expectancy']), "", "", "", "", "", ""))
     widths = [max(len(str(r[i])) for r in rows) for i in range(len(rows[0]))]
     lines = ["  ".join(str(v).rjust(w) if i else str(v).ljust(w) for i, (v, w) in enumerate(zip(r, widths)))
              for r in rows]
@@ -399,6 +413,8 @@ def main():
     ap.add_argument("--modes", default="mid,conservative")
     ap.add_argument("--stop-loss", default="none",
                     help="close when the put is >= N x credit; comma list to compare, e.g. none,2,3,4")
+    ap.add_argument("--vix-max", default="none",
+                    help="skip new entries when the prior day's VIX close is above N; comma list, e.g. none,20,25,30")
     ap.add_argument("--data-dir", default=None, help="use local full-chain parquet files instead of Databento")
     ap.add_argument("--offline", action="store_true", help="Databento cache only, no downloads")
     ap.add_argument("--yes", action="store_true", help="skip the cost prompt")
@@ -427,20 +443,29 @@ def main():
             if total != 0 and not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
                 raise SystemExit("Stopped before downloading.")
 
-    stops = [None if x.strip().lower() in ("none", "0", "") else float(x) for x in args.stop_loss.split(",")]
+    def levels(text):
+        return [None if x.strip().lower() in ("none", "0", "") else float(x) for x in text.split(",")]
+
+    stops, vix_levels = levels(args.stop_loss), levels(args.vix_max)
+    vix = None
+    if any(vix_levels):
+        vix = load_vix(HERE / "cache", end)
+        print(f"VIX history: {len(vix)} days, {min(vix)} .. {max(vix)}")
     results = {}
     for mode in args.modes.split(","):
         for stop in stops:
-            tag = f"stop{stop:g}x" if stop else ""
-            key = f"{mode} {tag}".strip()
-            print(f"Running {key} {args.start} .. {end}")
-            p = Params(commission=args.commission, fill_mode=mode, stop_loss=stop)
-            trades, eq, skipped = run(source, args.start, end, p, log=print)
-            label = ("mid fills" if mode == "mid" else "bid entry / ask exit") + \
-                    (f", stop at {stop:g}x credit" if stop else "")
-            out = Path(args.out) / (f"{mode}_{tag}" if stop else mode)
-            results[key] = report(trades, eq, skipped, out, label)
-            print(f"  -> {out}")
+            for vmax in vix_levels:
+                tags = ([f"stop{stop:g}x"] if stop else []) + ([f"vix{vmax:g}"] if vmax else [])
+                key = " ".join([mode] + tags)
+                print(f"Running {key} {args.start} .. {end}")
+                p = Params(commission=args.commission, fill_mode=mode, stop_loss=stop, vix_max=vmax)
+                trades, eq, skipped = run(source, args.start, end, p, log=print, vix=vix)
+                label = ("mid fills" if mode == "mid" else "bid entry / ask exit") + \
+                        (f", stop at {stop:g}x credit" if stop else "") + \
+                        (f", no entry when VIX > {vmax:g}" if vmax else "")
+                out = Path(args.out) / "_".join([mode] + tags)
+                results[key] = report(trades, eq, skipped, out, label)
+                print(f"  -> {out}")
     (Path(args.out) / "summary_all.json").write_text(json.dumps(results, indent=2, default=str))
     text = comparison_text(results)
     (Path(args.out) / "report.txt").write_text(text)

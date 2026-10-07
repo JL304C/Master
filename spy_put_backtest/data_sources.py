@@ -18,8 +18,11 @@ LocalChainSource (tests / other vendors)
 cbbo-1m only writes a record when the quote or a trade changes, so each
 contract's quote is its last record inside the window before the close.
 """
+import csv
+import io
 import os
 import re
+import urllib.request
 import threading
 import time as _time
 import warnings
@@ -61,6 +64,54 @@ def load_env():
                 k, v = line.split("=", 1)
                 os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
     return found
+
+
+# --------------------------------------------------------------------------- VIX
+
+VIX_SOURCES = ["https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+               "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS"]
+
+
+def parse_vix_csv(text):
+    """{date: close} from Cboe's VIX_History.csv (DATE MM/DD/YYYY, CLOSE), FRED's
+    VIXCLS (date, value; '.' for holidays) or our own cache (date,close)."""
+    out = {}
+    for r in csv.DictReader(io.StringIO(text)):
+        keys = {k.strip().lower(): v for k, v in r.items() if k}
+        raw_d = keys.get("date") or keys.get("observation_date")
+        val = keys.get("close") or keys.get("vixcls")
+        if raw_d is None and r:
+            raw_d, val = list(r.values())[0], list(r.values())[-1]
+        try:
+            day = (pd.Timestamp(raw_d) if "/" not in raw_d
+                   else pd.to_datetime(raw_d, format="%m/%d/%Y")).date()
+            out[day] = float(val)
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def load_vix(cache_dir, end, log=print):
+    """Daily VIX closes, cached in cache/vix_daily.csv. Free (Cboe, FRED as fallback);
+    refreshed when the cache doesn't reach the backtest's end date."""
+    path = Path(cache_dir) / "vix_daily.csv"
+    have = parse_vix_csv(path.read_text()) if path.exists() else {}
+    need = pd.Timestamp(end).date() - pd.Timedelta(days=5)
+    if not have or max(have) < need:
+        for url in VIX_SOURCES:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                rows = parse_vix_csv(urllib.request.urlopen(req, timeout=60).read().decode("utf-8-sig"))
+                if len(rows) > 1000:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("date,close\n" + "".join(f"{k},{v}\n" for k, v in sorted(rows.items())))
+                    have = rows
+                    break
+            except Exception as exc:  # noqa: BLE001
+                log(f"  (VIX download from {url.split('/')[2]} failed: {exc})")
+    if not have:
+        raise SystemExit(f"No VIX history. Put a CSV with date,close columns at {path}")
+    return have
 
 
 # --------------------------------------------------------------------------- helpers

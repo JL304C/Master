@@ -247,3 +247,30 @@ def test_cli_compares_stop_levels(synth_dir, tmp_path, monkeypatch, capsys):
     text = (out / "report.txt").read_text()
     assert "mid all" in text and "mid stop3x all" in text and "stops" in text
     assert (out / "mid" / "trades.csv").exists() and (out / "mid_stop3x" / "trades.csv").exists()
+
+
+def test_parse_vix_formats():
+    import datetime as dt
+    from data_sources import parse_vix_csv
+    cboe = "DATE,OPEN,HIGH,LOW,CLOSE\n03/20/2020,70.0,72.0,60.0,66.04\n03/23/2020,66.0,68.0,60.0,61.59\n"
+    fred = "observation_date,VIXCLS\n2020-03-20,66.04\n2020-03-21,.\n2020-03-23,61.59\n"
+    ours = "date,close\n2020-03-20,66.04\n2020-03-23,61.59\n"
+    want = {dt.date(2020, 3, 20): 66.04, dt.date(2020, 3, 23): 61.59}
+    for text in (cboe, fred, ours):
+        assert parse_vix_csv(text) == want
+
+
+def test_vix_filter_uses_prior_close(synth_dir):
+    import datetime as dt
+    sessions, _ = bt.sessions_between("2019-01-01", "2019-12-31")
+    vix = {d: 15.0 for d in sessions}
+    vix[dt.date(2019, 3, 8)] = 40.0     # Friday spike -> skip Monday 3/11
+    vix[dt.date(2019, 5, 13)] = 40.0    # spike on Monday itself -> 5/13 entry still allowed
+    base, _, _ = bt.run(LocalChainSource(synth_dir), "2019-01-01", "2019-12-31", bt.Params(stop_loss=3))
+    t, _, skipped = bt.run(LocalChainSource(synth_dir), "2019-01-01", "2019-12-31",
+                           bt.Params(stop_loss=3, vix_max=25), vix=vix)
+    assert list(skipped.date) == [dt.date(2019, 3, 11)]
+    assert "VIX filter" in skipped.reason.iloc[0]
+    entries = set(t.entry_date)
+    assert dt.date(2019, 3, 11) not in entries and dt.date(2019, 5, 13) in entries
+    assert len(t) == len(base) - 1

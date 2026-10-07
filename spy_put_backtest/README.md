@@ -17,6 +17,7 @@ so the first real run happens on your laptop (same as `spy_double_calendar`).
 | Profit target | Buy back at the first close where the put is ≤ 50% of the credit |
 | Time exit | Buy back at the first close at ≤ 21 days to expiry |
 | Stop loss | None by default (as in the source). `--stop-loss 3` closes at the first close where the put is ≥ 3× the credit (≈ 2× credit loss); `--stop-loss none,2,3,4` compares levels |
+| VIX filter | Off by default. `--vix-max 25` skips a week's new entry when the **previous** trading day's VIX close is above 25 (open positions are still managed). `--vix-max none,20,25,30` compares levels |
 | Commission | $1.00 per contract per side (`--commission`) |
 
 Two fill models run on **the same contracts**:
@@ -64,6 +65,8 @@ python backtest.py                               # full run, 2013-04-01 to two t
 - The key is read from `DATABENTO_API_KEY` in a `.env` in this folder, or in any sibling folder (`spy_double_calendar/.env` works).
 - Stop-loss comparison on the data you already have (no downloads): `python backtest.py --offline --modes mid --stop-loss none,2,3,4`.
   Each level gets its own folder (`results/mid_stop3x/` …) and a row in `results/report.txt`.
+- VIX filter with the 3× stop (no Databento downloads; VIX history comes free from Cboe, or FRED as a fallback, and is cached in `cache/vix_daily.csv`):
+  `python backtest.py --offline --modes mid --stop-loss 3 --vix-max none,20,25,30`
 - Options: `--commission 0.65`, `--start/--end`, `--modes mid` (one fill model), `--offline`, `--yes` (skip the cost prompt),
   `--data-dir <folder>` (local full-chain parquet files from another vendor instead of Databento).
 
