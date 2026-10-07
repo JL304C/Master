@@ -344,7 +344,11 @@ def run(broker, log: Log, today: date, dry_run: bool = False) -> None:
             continue
         reason, limit = decision
         qty = abs(p["qty"])
-        oid = "DRY-RUN" if dry_run else broker.submit_limit(sym, "buy", qty, limit, opening=False)
+        try:
+            oid = "DRY-RUN" if dry_run else broker.submit_limit(sym, "buy", qty, limit, opening=False)
+        except Exception as exc:  # noqa: BLE001 -- a rejected order must be logged, not crash the run
+            log({"action": "alert", "symbol": sym, "reason": f"{reason} buy-back REJECTED by Alpaca: {exc}"})
+            continue
         log({"action": "close_put", "symbol": sym, "qty": qty, "limit": round(limit, 2), "order_id": oid,
              "exit_reason": reason, "credit": credit, "mid": round(mid, 3), "dte": dte,
              "reason": f"{reason}: mid {mid:.2f} vs credit {credit:.2f}, {dte} DTE; buy limit {limit:.2f}"})
@@ -372,7 +376,11 @@ def run(broker, log: Log, today: date, dry_run: bool = False) -> None:
              "reason": f"cash secured would be ${secured + need:,.0f} > cap ${MAX_CASH_SECURED:,.0f}"})
         return
     limit = max(row["bid"], round(row["mid"] - ENTRY_CONCESSION, 2))
-    oid = "DRY-RUN" if dry_run else broker.submit_limit(row["symbol"], "sell", CONTRACTS, limit, opening=True)
+    try:
+        oid = "DRY-RUN" if dry_run else broker.submit_limit(row["symbol"], "sell", CONTRACTS, limit, opening=True)
+    except Exception as exc:  # noqa: BLE001 -- a rejected order must be logged, not crash the run
+        log({"action": "alert", "symbol": row["symbol"], "reason": f"entry order REJECTED by Alpaca: {exc}"})
+        return
     retry = "" if today == days[0] else " (retry: first day of the week missed or unfilled)"
     log({"action": "open_put", "trade_date": today.isoformat(), "symbol": row["symbol"], "qty": CONTRACTS,
          "limit": limit, "order_id": oid,
@@ -384,13 +392,22 @@ def run(broker, log: Log, today: date, dry_run: bool = False) -> None:
 
 
 def main():
+    """Every outcome -- including missing keys and crashes -- lands in the log, because under
+    Task Scheduler the console window closes before anyone can read it."""
     dry_run = "--dry-run" in sys.argv
+    log = Log(dry_run=dry_run)
     load_env_file(HERE / ".env")
     key, secret = os.environ.get("ALPACA_API_KEY"), os.environ.get("ALPACA_SECRET_KEY")
     if not key or not secret:
-        sys.exit(f"Missing ALPACA_API_KEY / ALPACA_SECRET_KEY. Put them in {HERE / '.env'} "
-                 "(the paper keys of the account this bot should trade).")
-    run(AlpacaBroker(key, secret), Log(dry_run=dry_run), datetime.now(ET).date(), dry_run=dry_run)
+        log({"action": "error", "reason": f"Missing ALPACA_API_KEY / ALPACA_SECRET_KEY in {HERE / '.env'}"})
+        sys.exit(1)
+    try:
+        run(AlpacaBroker(key, secret), log, datetime.now(ET).date(), dry_run=dry_run)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        log({"action": "error", "reason": f"{type(exc).__name__}: {exc}",
+             "traceback": traceback.format_exc()[-2000:]})
+        sys.exit(1)
 
 
 if __name__ == "__main__":

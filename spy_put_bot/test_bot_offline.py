@@ -202,3 +202,27 @@ def test_bad_quote_never_triggers_an_exit(log, bid, ask):
     assert not [o for o in b.submitted if not o["opening"]]
     assert "looks bad" in [json.loads(x) for x in log.jsonl.read_text().splitlines()
                            if json.loads(x)["action"] == "alert"][-1]["reason"]
+
+
+def test_rejected_entry_is_logged_not_crashed(log):
+    b = FakeBroker(MONDAY)
+
+    def reject(*a, **k):
+        raise RuntimeError("insufficient options buying power")
+    b.submit_limit = reject
+    bot.run(b, log, MONDAY)
+    alert = log.events("alert")[-1]
+    assert "REJECTED" in alert["reason"] and "buying power" in alert["reason"]
+    assert log.events("open_put") == []                    # a rejected entry isn't recorded as ours
+
+
+def test_main_logs_missing_keys(tmp_path, monkeypatch):
+    monkeypatch.setattr(bot, "HERE", tmp_path)
+    monkeypatch.setattr(bot, "LOG_JSONL", tmp_path / "l.jsonl")
+    monkeypatch.setattr(bot, "LOG_CSV", tmp_path / "l.csv")
+    monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPACA_SECRET_KEY", raising=False)
+    monkeypatch.setattr(bot.Log.__init__, "__defaults__", (tmp_path / "l.jsonl", tmp_path / "l.csv", False, False))
+    with pytest.raises(SystemExit):
+        bot.main()
+    assert "Missing ALPACA_API_KEY" in (tmp_path / "l.jsonl").read_text()

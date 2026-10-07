@@ -41,14 +41,20 @@ sizes anything account-wide. `nvda_condor_bot.py` works the same way, so the two
    ```
    The dry run prints what it would do: on Monday–Wednesday, the put it would sell (expiry, strike, delta, price).
 5. Schedule it in Task Scheduler, once per weekday at **3:45 PM Eastern** (adjust for your time zone):
-   - Action: `python.exe`, argument `C:\Users\jeffl\Master\spy_put_bot\spy_put_bot.py`,
-     **Start in** `C:\Users\jeffl\Master\spy_put_bot` (so it finds `.env` and its log).
+   - Action: Program/script = the **full path** to python.exe (find it with `(Get-Command python).Source`,
+     e.g. `C:\Users\jeffl\AppData\Local\Programs\Python\Python314\python.exe`);
+     arguments `C:\Users\jeffl\Master\spy_put_bot\spy_put_bot.py`;
+     **Start in** `C:\Users\jeffl\Master\spy_put_bot` with **no quotes**.
+   - If History shows "Action failed to start" with error 2147942402, Windows couldn't find
+     python.exe or the Start-in folder: recheck those two boxes.
    - Conditions → "Wake the computer to run this task"; Settings → "Run task as soon as possible after a scheduled start is missed".
 
 ## What it writes
 
 - `spy_put_log.jsonl`: every decision, with prices and order IDs. **The bot's memory: keep it.**
 - `spy_put_trades.csv`: the same, one line per decision, for a quick look in Notepad.
+- Rejected orders and crashes are logged too (`alert` / `error` lines), since the console window
+  closes too fast to read under Task Scheduler.
 
 ## Things to check on the first live paper fills
 
