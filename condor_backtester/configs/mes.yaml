@@ -1,0 +1,29 @@
+# MES: same structure at the longest DTE MES currently lists.
+# If CME lists longer expirations, raise target_dte and set
+# product_overrides.expiration_rules (see README).
+product: MES            # new cash-settled Micro options, $5/pt, European
+entry_weekday: FRI
+target_dte: 49          # MES options currently list ~8 Fridays (~56 days) out
+dte_tolerance: 7
+debit_delta: 0.20
+debit_width: 25         # SPX points (all products use SPX-equivalent points)
+credit_delta: 0.10
+credit_width: 100
+min_credit: 0.01        # SPX points; try 1.0 / 2.0
+overlap_rule: skip      # skip | allow_equal | shift
+pricing: mid            # mid | slippage | natural (natural needs real bid/ask)
+slippage_per_leg: 0.05  # native quote units
+take_profit_pct: null
+stop_loss_mult: null
+exit_dte: null
+max_concurrent_positions: null
+max_aggregate_max_loss: null
+contracts: 1
+start_date: 2020-10-01
+end_date: 2025-10-01
+risk_free_rate: 0.04
+div_yield: 0.015
+surface:                # model-price assumptions; replace with `calibrate` output once you have real chains
+  vix_to_atm: 0.87
+  skew_put: 0.36
+  curv_put: 0.0
