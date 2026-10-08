@@ -24,6 +24,6 @@ end_date: 2025-10-01
 risk_free_rate: 0.04
 div_yield: 0.015
 surface:                # model-price assumptions; replace with `calibrate` output once you have real chains
-  vix_to_atm: 0.87
-  skew_put: 0.36
+  vix_to_atm: 0.75       # fitted to SPX 2020-2025: credit ~2.1, 2022 loss present
+  skew_put: 0.30
   curv_put: 0.0

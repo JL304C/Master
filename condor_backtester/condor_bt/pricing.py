@@ -8,11 +8,12 @@ term structure and adds a put skew that is linear in normalized moneyness:
     sigma = atm * (1 - skew_put * z + curv_put * z^2)   for z < 0
     sigma = atm * (1 - skew_call * z)                    for z >= 0
 
-The defaults put a 3-month SPX 25-delta put about 4-5 vol points and a
-10-delta put about 8-9 vol points over ATM when ATM is ~15%, which is roughly
-where SPX has traded in normal markets. The broken-wing credit comes almost
-entirely from that skew, so treat the defaults as assumptions to calibrate
-against real chains (see ``calibrate`` in the CLI), not as data.
+The defaults (vix_to_atm 0.75, skew_put 0.30) were picked with the surface
+sweep on real SPX/VIX history 2020-2025: they give a ~2.1 point average
+credit and keep the June-2022 loss that the tastytrade reference backtest
+shows. The broken-wing credit and the tail losses are very sensitive to these
+two numbers, so treat them as assumptions to calibrate against real chains
+(see ``calibrate`` in the CLI), not as data.
 """
 from __future__ import annotations
 
@@ -72,8 +73,8 @@ def implied_vol(price: float, f: float, k: float, t: float, r: float) -> float |
 
 @dataclass(frozen=True)
 class SurfaceParams:
-    vix_to_atm: float = 0.87     # 30d ATM IV ~= VIX * this (VIX includes the skew premium)
-    skew_put: float = 0.36
+    vix_to_atm: float = 0.75     # 30d ATM IV ~= VIX * this (VIX includes the skew premium)
+    skew_put: float = 0.30
     curv_put: float = 0.0
     skew_call: float = 0.15
     vol_floor_frac: float = 0.5  # sigma never below this fraction of ATM
