@@ -1,0 +1,19 @@
+# Settings for the weekly order helper: python -m condor_bt.weekly plan
+# Prices and widths are native XSP (0.15 = $15 per contract; 1 XSP point = 10 SPX points).
+symbol: XSP
+target_dte: 90
+dte_tolerance: 7
+debit_delta: 0.20
+debit_width: 3          # buy ~20-delta, sell 3 below
+credit_delta: 0.10
+credit_width: 10        # sell ~10-delta, buy 10 below
+min_credit: 0.10        # skip the week if the mid credit is below this; also the ladder floor
+ladder_steps: 3         # suggested limit prices: mid, mid-0.01, ... (never below min_credit)
+contracts: 1
+fee_per_contract: 0.66  # Schwab $0.65 + ~$0.01 regulatory, per leg
+max_open_positions: 13
+max_total_risk: 9000    # dollars of max loss across open positions
+journal: journal/xsp_journal.csv
+risk_free_rate: 0.04
+div_yield: 0.013
+source: auto            # auto | yahoo | schwab

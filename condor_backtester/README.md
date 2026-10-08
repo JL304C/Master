@@ -91,6 +91,43 @@ Outputs go to `results\<name>\`:
 - `equity.png`: cumulative P&L (realized and mark-to-market), drawdown, capital at risk.
 - `summary.md` / `summary.json`: win rate, average win/loss, worst trade, total P&L, fees, mark-to-market and realized drawdown, max concurrent positions, worst-case aggregate loss, peak buying power, ROC and CAGR on Reg-T capital and on peak buying power, losses by expiration month, and SPX buy-and-hold over the same window.
 
+## Weekly order helper (XSP)
+
+Run it each Friday during market hours. It never places orders. It prints
+the exact thinkorswim order for you to check and enter.
+
+```powershell
+pip install yfinance
+python -m condor_bt.weekly plan        # this week's 4 strikes, deltas, credit, order + limit ladder
+python -m condor_bt.weekly record 2026-12-31 732/729/690/680 0.15 --mid 0.14   # after a fill
+python -m condor_bt.weekly status      # open positions, total risk, your fills vs mid
+```
+
+- Settings are in `configs/weekly_xsp.yaml`: deltas, widths (3 and 10 XSP
+  points), `min_credit`, position and risk limits, and Schwab's $0.66 per-leg fee.
+- `plan` skips the week, and says why, if no expiration is within 90 +/- 7
+  days, the strikes overlap, the mid credit is below `min_credit`, or the
+  entry would break `max_open_positions` / `max_total_risk`.
+- The journal (`journal/xsp_journal.csv`) is what `status` and the risk
+  limits use, so record every fill. `status` also turns your fills-vs-mid
+  record into the `slippage_per_leg` to use in the backtest.
+- Always compare the strikes and mid with thinkorswim before sending. Yahoo
+  quotes can be delayed ~15 minutes, and if Yahoo has no XSP chain the helper
+  uses SPX / 10, which is approximate.
+
+### Schwab API (optional, live quotes with Schwab's deltas)
+
+1. Create an app at developer.schwab.com ("Accounts and Trading Production"),
+   callback URL `https://127.0.0.1:8182`. Approval can take a few days.
+2. `pip install schwab-py`, then set the app's key and secret:
+   ```powershell
+   setx SCHWAB_API_KEY "your-app-key"
+   setx SCHWAB_APP_SECRET "your-app-secret"
+   ```
+3. Open a new PowerShell and run `python -m condor_bt.weekly plan --source schwab`.
+   The first run opens a browser to log in; the token is saved in `journal\`.
+   After that, `source: auto` uses Schwab automatically.
+
 ## Option prices: model vs. real chains
 
 **By default, option prices come from a model, not real quotes.** It uses
