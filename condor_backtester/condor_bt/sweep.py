@@ -21,11 +21,12 @@ SPEC_GRID = {
 
 # Model-risk grid: how much do results move if the synthetic skew is wrong?
 SURFACE_GRID = {
-    "surface.vix_to_atm": [0.80, 0.87, 0.95],
-    "surface.skew_put": [0.25, 0.36, 0.45],
+    "surface.vix_to_atm": [0.75, 0.80, 0.87, 0.95],
+    "surface.skew_put": [0.12, 0.18, 0.24, 0.30, 0.36],
 }
 
 KEEP = ["trades", "skipped", "win_rate", "losses", "full_max_loss_trades", "avg_credit_pts",
+        "avg_l3_pct_below_spot", "loss_expiry_months",
         "total_pnl_mtm_usd", "fees_usd", "worst_trade_usd", "max_drawdown_mtm_usd",
         "max_concurrent_positions", "worst_case_aggregate_loss_usd", "peak_buying_power_usd",
         "roc_regt_pct", "cagr_on_regt_capital_pct", "roc_peak_bp_pct"]

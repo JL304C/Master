@@ -63,6 +63,7 @@ def summary_markdown(s: dict) -> str:
         f"| Avg win / avg loss | {_money(s['avg_win_usd'])} / {_money(s['avg_loss_usd'])} |",
         f"| Worst trade | {_money(s['worst_trade_usd'])} ({s['full_max_loss_trades']} full max-loss) |",
         f"| Avg credit | {s['avg_credit_pts']} SPX pts = {_money(s['avg_credit_usd'])} |",
+        f"| Avg short 10-delta strike (L3) below spot | {_pct(s['avg_l3_pct_below_spot'])} |",
         f"| Total P&L (closed / incl. open MTM) | {_money(s['total_pnl_closed_usd'])} / {_money(s['total_pnl_mtm_usd'])} |",
         f"| Fees | {_money(s['fees_usd'])} ({_pct(s['fees_pct_of_gross_credit'])} of gross credit) |",
         f"| Max drawdown, mark-to-market | {_money(s['max_drawdown_mtm_usd'])} on {s['max_drawdown_mtm_date']} |",

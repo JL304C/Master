@@ -79,6 +79,8 @@ def summarize(res: Result) -> dict:
         "outcomes": closed["outcome"].value_counts().to_dict() if len(closed) else {},
         "avg_credit_pts": _f(t["credit_pts"].mean(), 3) if len(t) else None,
         "avg_credit_usd": _f(t["credit_usd"].mean()) if len(t) else None,
+        "avg_l3_pct_below_spot": _f(100 * (1 - t["l3"] / t["spot_at_entry"]).mean(), 1) if len(t) else None,
+        "loss_expiry_months": " ".join(f"{m}({v['count']})" for m, v in loss_months.items()),
         "total_pnl_closed_usd": _f(total_closed),
         "total_pnl_mtm_usd": _f(total_mtm),
         "fees_usd": _f(fees),
