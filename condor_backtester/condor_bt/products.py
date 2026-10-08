@@ -9,8 +9,11 @@ Everything inside the engine is expressed in **SPX-equivalent index points**
 - how expiration is settled (AM/PM, spot index vs. futures),
 - fees and the margin model.
 
-Fee and margin numbers below are rough placeholders, not quotes from any
-broker. Override them in the YAML (``product_overrides``) with your own.
+Fees default to Charles Schwab's published rates plus estimated exchange and
+regulatory fees (Oct 2026): $0.65/contract for index options, $2.25/contract
+per side for futures options. Exchange fees are estimates; check the
+thinkorswim order confirmation and override them in the YAML
+(``product_overrides``). Margin numbers are rough approximations.
 """
 from __future__ import annotations
 
@@ -63,7 +66,7 @@ PRODUCTS: dict[str, Product] = {
         name="XSP", usd_per_point=10.0, price_scale=0.1, strike_step=10.0,
         underlying_kind="index", settlement="pm", exercise_style="european",
         expiration_rules=(ExpirationRule("friday", 120), ExpirationRule("third_friday", 400)),
-        fee_per_contract_open=0.75, fee_per_contract_close=0.75, settlement_fee=0.0,
+        fee_per_contract_open=0.70, fee_per_contract_close=0.70, settlement_fee=0.0,
         margin_model="regt",
         notes="Mini-SPX = SPX/10, $100 multiplier, $1 strikes (= 10 SPX points), cash settled.",
     ),
@@ -71,7 +74,7 @@ PRODUCTS: dict[str, Product] = {
         name="ES", usd_per_point=50.0, price_scale=1.0, strike_step=5.0,
         underlying_kind="futures", settlement="am_on_quarterly", exercise_style="american",
         expiration_rules=(ExpirationRule("third_friday", 400), ExpirationRule("friday", 35)),
-        fee_per_contract_open=2.00, fee_per_contract_close=2.00, settlement_fee=0.0,
+        fee_per_contract_open=2.85, fee_per_contract_close=2.85, settlement_fee=0.0,
         margin_model="span_approx", span_min_margin_usd=500.0,
         notes="Quarterlies settle into expiring futures (cash, SOQ). Serial months exercise "
               "into the next quarterly future (a real futures position). American style.",
@@ -82,7 +85,7 @@ PRODUCTS: dict[str, Product] = {
         # New financially settled Micro options (launched 2026-06-29): weekday expiries,
         # ~8 consecutive Fridays listed. Raise max_dte if CME lists longer dates.
         expiration_rules=(ExpirationRule("friday", 56), ExpirationRule("month_end", 63)),
-        fee_per_contract_open=0.85, fee_per_contract_close=0.85, settlement_fee=0.0,
+        fee_per_contract_open=2.45, fee_per_contract_close=2.45, settlement_fee=0.0,
         margin_model="span_approx", span_min_margin_usd=50.0,
         notes="Financially settled at the 3:00pm CT ES fixing price, European style.",
     ),

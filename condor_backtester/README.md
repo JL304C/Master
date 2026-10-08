@@ -43,11 +43,12 @@ Things that matter for the MES/XSP question:
   `product_overrides: {expiration_rules: [{kind: friday, max_dte: 56}, {kind: third_friday, max_dte: 400}]}`.
 - **XSP strikes are $1 = 10 SPX points**, so a 25-point debit spread isn't
   possible. `configs/xsp.yaml` uses 30 (20 also works).
-- **Fees eat into the small products.** MES collects ~$5-10 per condor, and
-  4 legs of commissions take a large share of that. The fee numbers in
-  `condor_bt/products.py` are rough placeholders. Put your broker's real
-  all-in per-contract fees in `product_overrides`
-  (`fee_per_contract_open`, `fee_per_contract_close`) before trusting any MES/XSP result.
+- **Fees eat into the small products.** Defaults are Schwab's published
+  rates plus estimated exchange fees: XSP ~$0.70, ES ~$2.85 and MES ~$2.45
+  per contract. Schwab charges futures options a flat $2.25 per contract
+  regardless of size, so a 4-leg MES condor costs ~$9.80 to open against a
+  ~$8-9 average credit. Check your thinkorswim order confirmation and override
+  with `product_overrides` (`fee_per_contract_open`, `fee_per_contract_close`).
 - ES American-style early assignment is **not** simulated. ES serial-month
   options settle into the next quarterly future, and the backtest values that
   as cash at the futures price.
