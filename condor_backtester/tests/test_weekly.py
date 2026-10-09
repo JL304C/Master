@@ -120,3 +120,28 @@ def test_yahoo_falls_back_to_spx_scaled(settings, monkeypatch):
     assert spot == pytest.approx(777.0) and exp == EXP
     assert all(q.strike == int(q.strike) for q in quotes)   # 7775 (-> 777.5) dropped
     assert max(q.strike for q in quotes) < 800
+
+
+def test_stale_quote_is_flagged_and_estimated(settings):
+    """Real case from 2026-10-09: Yahoo priced the 684 put at 4.29, above the 694 put."""
+    rows, now = model_rows(spot=781.73, now=datetime(2026, 10, 9, 15, 29))
+    quotes = wk.quotes_from_prices(rows, 781.73, EXP, now, 0.04, 0.013)
+    clean, _ = wk.build_plan(quotes, EXP, TODAY, settings)
+    l4 = clean.strikes[3]
+    bad = [wk.PutQuote(q.strike, 4.25, 4.33, -0.098) if q.strike == l4 else q for q in quotes]
+    plan, why = wk.build_plan(bad, EXP, TODAY, settings)
+    assert plan is not None, why
+    assert plan.strikes == clean.strikes
+    assert l4 in plan.suspects and plan.suspects[l4].mid == pytest.approx(4.29)
+    assert plan.mid_credit == pytest.approx(clean.mid_credit, abs=0.03)   # estimate, not the bad 4.29
+    assert not wk.build_plan(quotes, EXP, TODAY, settings)[0].suspects   # clean chain: nothing flagged
+
+
+def test_bad_quote_not_used_to_pick_strikes(settings):
+    rows, now = model_rows()
+    quotes = wk.quotes_from_prices(rows, 777.0, EXP, now, 0.04, 0.013)
+    clean, _ = wk.build_plan(quotes, EXP, TODAY, settings)
+    # a stale far-OTM quote whose implied delta lands exactly on -0.10
+    bad = [wk.PutQuote(q.strike, 9.0, 9.1, -0.100) if q.strike == 640 else q for q in quotes]
+    plan, _ = wk.build_plan(bad, EXP, TODAY, settings)
+    assert plan.strikes == clean.strikes

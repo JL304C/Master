@@ -77,6 +77,7 @@ class Plan:
     mid_credit: float
     natural_credit: float     # if every leg filled at the worse side
     best_credit: float        # if every leg filled at the better side
+    suspects: dict = None     # strike -> bad quote that was replaced by an estimate
 
 
 def load_settings(path: str | None) -> dict:
@@ -97,15 +98,49 @@ def pick_expiration(expirations: list[date], today: date, target: int, tol: int)
     return min(ok, key=lambda e: (abs((e - today).days - target), e)) if ok else None
 
 
+def _line(x0, y0, x1, y1, x):
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+
+def find_bad_quotes(quotes: list[PutQuote], abs_tol: float = 0.08, rel_tol: float = 0.15) -> dict:
+    """Flag quotes that are out of line with nearby strikes (stale or bad data).
+
+    Put prices rise smoothly with strike, so each mid is compared with the
+    median of three estimates: interpolated from the strikes on either side,
+    and extrapolated from the two strikes below and the two above. Returns
+    {strike: estimated PutQuote} for each bad quote.
+    """
+    qs = sorted(quotes, key=lambda q: q.strike)
+    bad = {}
+    for i in range(1, len(qs) - 1):
+        q = qs[i]
+        preds = [_line(qs[i - 1].strike, qs[i - 1].mid, qs[i + 1].strike, qs[i + 1].mid, q.strike)]
+        if i >= 2:
+            preds.append(_line(qs[i - 2].strike, qs[i - 2].mid, qs[i - 1].strike, qs[i - 1].mid, q.strike))
+        if i + 2 < len(qs):
+            preds.append(_line(qs[i + 1].strike, qs[i + 1].mid, qs[i + 2].strike, qs[i + 2].mid, q.strike))
+        expect = sorted(preds)[len(preds) // 2]
+        if abs(q.mid - expect) > max(abs_tol, rel_tol * expect):
+            lo, hi = qs[i - 1], qs[i + 1]
+            half = 0.25 * ((lo.ask - lo.bid) + (hi.ask - hi.bid))
+            delta = _line(lo.strike, lo.delta, hi.strike, hi.delta, q.strike)
+            bad[q.strike] = (q, PutQuote(q.strike, max(expect - half, 0.0), expect + half, delta))
+    return bad
+
+
 def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -> tuple[Plan | None, str]:
     """Same rules as the backtest: L1 ~debit_delta, L2 = L1 - debit_width,
-    L3 ~credit_delta, L4 = L3 - credit_width, all must be listed, L3 < L2."""
-    usable = [q for q in quotes if q.ask > 0 and math.isfinite(q.delta) and q.delta < 0]
+    L3 ~credit_delta, L4 = L3 - credit_width, all must be listed, L3 < L2.
+    Bad quotes are not used to pick strikes; if a leg's quote is bad, its
+    price is estimated from the neighboring strikes and the plan says so."""
+    usable = [q for q in quotes if q.ask > 0 and q.bid <= q.ask and math.isfinite(q.delta) and q.delta < 0]
     if not usable:
         return None, "no usable put quotes (market closed or data source empty?)"
-    by_strike = {q.strike: q for q in usable}
-    q1 = min(usable, key=lambda q: abs(q.delta + s["debit_delta"]))
-    q3 = min(usable, key=lambda q: abs(q.delta + s["credit_delta"]))
+    bad = find_bad_quotes(usable)
+    by_strike = {q.strike: (bad[q.strike][1] if q.strike in bad else q) for q in usable}
+    good = [q for q in usable if q.strike not in bad]
+    q1 = min(good, key=lambda q: abs(q.delta + s["debit_delta"]))
+    q3 = min(good, key=lambda q: abs(q.delta + s["credit_delta"]))
     l1, l3 = q1.strike, q3.strike
     l2, l4 = l1 - s["debit_width"], l3 - s["credit_width"]
     if l3 >= l2:
@@ -118,7 +153,8 @@ def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -
     mid = -sum(sg * q.mid for sg, q in zip(signs, legs))
     natural = -sum(sg * (q.ask if sg > 0 else q.bid) for sg, q in zip(signs, legs))
     best = -sum(sg * (q.bid if sg > 0 else q.ask) for sg, q in zip(signs, legs))
-    plan = Plan(expiration, (expiration - today).days, (l1, l2, l3, l4), legs, mid, natural, best)
+    suspects = {k: bad[k][0] for k in (l1, l2, l3, l4) if k in bad}
+    plan = Plan(expiration, (expiration - today).days, (l1, l2, l3, l4), legs, mid, natural, best, suspects)
     return plan, ""
 
 
@@ -300,6 +336,12 @@ def cmd_plan(a, s):
     print(f"\n  Credit at mid {plan.mid_credit:.2f}   (worst fill {plan.natural_credit:.2f}, "
           f"best fill {plan.best_credit:.2f}; negative = debit)")
     print(f"  Short strike {100 * (1 - plan.strikes[2] / spot):.1f}% below {s['symbol']}")
+    for k, q in (plan.suspects or {}).items():
+        est = next(x for x in plan.quotes if x.strike == k)
+        print(f"\n  WARNING: the {k:g} put quote from {src} (bid {q.bid:.2f} / ask {q.ask:.2f}, mid {q.mid:.2f}) "
+              f"is out of line with nearby strikes, probably stale.\n"
+              f"  Using an estimate of {est.mid:.2f} from the neighboring strikes. "
+              f"CHECK the {k:g} put in thinkorswim before trading.")
 
     if plan.mid_credit < s["min_credit"]:
         print(f"\nSKIP: mid credit {plan.mid_credit:.2f} is below min_credit {s['min_credit']:.2f}")
