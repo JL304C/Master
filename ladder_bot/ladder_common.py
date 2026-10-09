@@ -59,6 +59,21 @@ def bs_put_delta(S: float, K: float, T: float, r: float, q: float, sigma: float)
     return math.exp(-q * T) * norm_cdf(-d1)
 
 
+def implied_vol_put(price: float, S: float, K: float, T: float, r: float, q: float):
+    """Black-Scholes IV for a put from its price (bisection). None if the price
+    is outside what any volatility can produce (e.g. below intrinsic)."""
+    lo, hi = 0.01, 3.0
+    if not (bs_put(S, K, T, r, q, lo) <= price <= bs_put(S, K, T, r, q, hi)):
+        return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if bs_put(S, K, T, r, q, mid) < price:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
 def atm_vol_from_vix(vix: float) -> float:
     v = vix / 100.0
     return ATM_VS_VIX * (v + TERM_PULL * (LT_VOL - v))

@@ -185,21 +185,22 @@ def snap_equal_spacing(raw, strikes, max_shift=2):
 
 
 def pick_ladder(spot: float, exp: date, chain: dict, r=RATE, q=DIV_YIELD):
-    """Delta first (Alpaca's greeks; Black-Scholes from the contract's own IV
-    as fallback), then snap to equal spacing on strikes that actually exist."""
+    """Delta first, then snap to equal spacing on strikes that actually exist.
+    Delta source, in order: Alpaca's greeks; Black-Scholes from Alpaca's IV;
+    Black-Scholes from IV solved off the quote's mid (Alpaca sends no greeks
+    or IV for XSP index options)."""
     T = max((exp - date.today()).days, 1) / 365.0
 
     def delta(k, row):
         if row["delta"] is not None:
             return row["delta"]
-        if row["iv"]:
-            return lc.bs_put_delta(spot, k, T, r, q, row["iv"])
-        return None
+        iv = row["iv"] or lc.implied_vol_put(row["mid"], spot, k, T, r, q)
+        return lc.bs_put_delta(spot, k, T, r, q, iv) if iv else None
 
     deltas = {k: delta(k, row) for k, row in chain.items()}
     deltas = {k: d for k, d in deltas.items() if d is not None}
     if not deltas:
-        return None, "no deltas/IV in chain"
+        return None, f"no deltas/IV in chain and no IV solvable from quotes (spot {spot:.2f}, {len(chain)} strikes)"
     raw = [min(deltas, key=lambda k: abs(deltas[k] - t)) for t in lc.TARGET_DELTAS]
     ks = snap_equal_spacing(raw, sorted(chain))
     if ks is None:
@@ -285,7 +286,7 @@ def try_open(api, force_day=False):
         return
     lad, info = pick_ladder(spot, exp, chain)
     if lad is None:
-        log({"action": "skip_open", "expiration": exp, "reason": info})
+        log({"action": "skip_open", "underlying": SYMBOL, "spot": round(spot, 2), "expiration": exp, "reason": info})
         return
 
     # Limit at mid (negative = credit for Alpaca mleg). Must be a net credit.
