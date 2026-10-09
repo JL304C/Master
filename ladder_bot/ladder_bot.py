@@ -1,5 +1,10 @@
 """
-1-1-1-2 Put Step-Down Ladder -- Alpaca PAPER-trading bot (SPY options).
+1-1-1-2 Put Step-Down Ladder -- Alpaca PAPER-trading bot (SPY or XSP options).
+
+Underlying: LADDER_UNDERLYING=SPY (default) or XSP, or --underlying on the
+command line. XSP (Mini-SPX = SPX/10) is cash-settled and European, so no
+early assignment and no 100 shares delivered at expiry. Alpaca has no quote
+for the index itself, so XSP's level is inferred from put-call parity.
 
     K1 BUY 1 ~22.5d | K2 SELL 1 ~17d | K3 BUY 1 ~13d | K4 SELL 2 ~10d
     same monthly expiration closest to 90 DTE, equal strike spacing,
@@ -15,12 +20,12 @@ SAFETY GATES (all must pass before any order is sent):
      ladders + the new one) must stay under LADDER_BP_CAP_PCT (default 20%)
      of account equity, and under Alpaca's options_buying_power.
   4. Account must report options_trading_level >= 3.
-  5. No new ladder if an open order on SPY options already exists.
+  5. No new ladder if an option order (SPY/XSP or any mleg) is still working.
 
 MANAGEMENT (LADDER_MODE):
   hold (default) - the backtested baseline: no target, no stop, hold to expiry.
   stop           - also run daily: close a whole ladder (one mleg market
-                   order) if SPY trades below that ladder's lower breakeven.
+                   order) if the underlying trades below that ladder's lower breakeven.
 
 Run daily via Task Scheduler (e.g. 3:30 PM ET): opens on Fridays, checks
 stops every day in stop mode. State comes from Alpaca positions plus the
@@ -34,6 +39,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import sys
 from datetime import date, datetime, timezone
@@ -46,8 +52,9 @@ LOG_JSONL = HERE / "ladder_log.jsonl"
 LOG_CSV = HERE / "ladder_trades.csv"
 LEDGER = HERE / "ladder_ledger.jsonl"
 
-SYMBOL = "SPY"
+UNDERLYINGS = ("SPY", "XSP")   # XSP = Mini-SPX index (SPX/10): cash-settled, European, ~SPY-sized
 STRIKE_INC = 1.0
+RATE, DIV_YIELD = 0.04, 0.013  # for Black-Scholes fallbacks and the XSP forward
 
 
 def load_env_file(path: Path) -> None:
@@ -66,6 +73,7 @@ load_env_file(HERE / ".env")
 APPROVED = os.environ.get("LADDER_BACKTEST_APPROVED", "").lower() == "yes"
 BP_CAP_PCT = float(os.environ.get("LADDER_BP_CAP_PCT", "20")) / 100.0
 MODE = os.environ.get("LADDER_MODE", "hold").lower()
+SYMBOL = os.environ.get("LADDER_UNDERLYING", "SPY").upper()   # overridden by --underlying
 
 
 def log(event: dict) -> None:
@@ -90,7 +98,8 @@ def occ(exp: date, k: float) -> str:
 
 
 def parse_occ(sym: str):
-    i = len(SYMBOL)
+    """XSP270115P00740000 -> (expiration, "P", 740.0). Works for any root."""
+    i = next(n for n, ch in enumerate(sym) if ch.isdigit())
     return datetime.strptime(sym[i:i + 6], "%y%m%d").date(), sym[i + 6], int(sym[i + 7:]) / 1000.0
 
 
@@ -106,17 +115,37 @@ class Alpaca:
         self.stock = StockHistoricalDataClient(key, sec)
         self.opt = OptionHistoricalDataClient(key, sec)
 
-    def spot(self) -> float:
+    def stock_mid(self, sym: str) -> float:
         from alpaca.data.requests import StockLatestQuoteRequest
-        q = self.stock.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=SYMBOL))[SYMBOL]
+        q = self.stock.get_stock_latest_quote(StockLatestQuoteRequest(symbol_or_symbols=sym))[sym]
         return (q.bid_price + q.ask_price) / 2.0
 
-    def chain(self, exp: date, lo: float, hi: float) -> dict:
-        """{strike: {"bid","ask","mid","delta","iv","symbol"}} for SPY puts at exp."""
+    def spot(self, underlying: str, exp: date) -> float:
+        """SPY: the stock quote. XSP is an index with no stock quote on Alpaca,
+        so its level comes from put-call parity on its own options at `exp`:
+        F = K + (C - P) * e^(rT) at the strikes nearest the money, then
+        spot = F * e^(-(r - q)T). SPY x ~1 only seeds the strike window."""
+        if underlying == "SPY":
+            return self.stock_mid("SPY")
+        guess = self.stock_mid("SPY")
+        lo, hi = guess * 0.92, guess * 1.08
+        puts = self.chain(exp, lo, hi, underlying, right="put")
+        calls = self.chain(exp, lo, hi, underlying, right="call")
+        T = max((exp - date.today()).days, 1) / 365.0
+        pairs = sorted((abs(calls[k]["mid"] - puts[k]["mid"]), k + (calls[k]["mid"] - puts[k]["mid"]) * math.exp(RATE * T))
+                       for k in set(puts) & set(calls))
+        if len(pairs) < 3:
+            raise RuntimeError(f"{underlying}: too few call/put pairs quoted near the money to infer the index level")
+        fwds = sorted(f for _, f in pairs[:5])
+        return fwds[len(fwds) // 2] * math.exp(-(RATE - DIV_YIELD) * T)
+
+    def chain(self, exp: date, lo: float, hi: float, underlying: str = None, right: str = "put") -> dict:
+        """{strike: {"bid","ask","mid","delta","iv","symbol"}} for one side of the chain at exp."""
         from alpaca.data.requests import OptionChainRequest
         from alpaca.trading.enums import ContractType
         snaps = self.opt.get_option_chain(OptionChainRequest(
-            underlying_symbol=SYMBOL, type=ContractType.PUT, expiration_date=exp,
+            underlying_symbol=underlying or SYMBOL,
+            type=ContractType.PUT if right == "put" else ContractType.CALL, expiration_date=exp,
             strike_price_gte=lo, strike_price_lte=hi))
         out = {}
         for sym, s in snaps.items():
@@ -155,7 +184,7 @@ def snap_equal_spacing(raw, strikes, max_shift=2):
     return best
 
 
-def pick_ladder(spot: float, exp: date, chain: dict, r=0.04, q=0.013):
+def pick_ladder(spot: float, exp: date, chain: dict, r=RATE, q=DIV_YIELD):
     """Delta first (Alpaca's greeks; Black-Scholes from the contract's own IV
     as fallback), then snap to equal spacing on strikes that actually exist."""
     T = max((exp - date.today()).days, 1) / 365.0
@@ -197,16 +226,19 @@ def open_ladders(api):
 
 
 def strategy_bp_in_use(api, held) -> float:
-    """Cash-secured requirement of everything held in SPY puts, per expiration:
-    the most those legs can lose at expiry (SPY -> 0), premium excluded."""
+    """Cash-secured requirement of every SPY/XSP put held (all ladders, both
+    underlyings), per root+expiration: the most those legs can lose at expiry
+    (underlying -> 0), premium excluded."""
     by_exp = {}
     for sym, qty in held.items():
-        if not sym.startswith(SYMBOL) or len(sym) < len(SYMBOL) + 15:
+        root = next((u for u in UNDERLYINGS if sym.startswith(u)), None)
+        if root is None or len(sym) < len(root) + 15:
             continue
         exp, right, k = parse_occ(sym)
         if right != "P":
             continue
-        by_exp[exp] = by_exp.get(exp, 0.0) + qty * k     # payoff at S=0 = sum(qty*K)
+        key = (root, exp)
+        by_exp[key] = by_exp.get(key, 0.0) + qty * k     # payoff at S=0 = sum(qty*K)
     return sum(max(0.0, -v) * lc.MULTIPLIER for v in by_exp.values())
 
 
@@ -234,14 +266,23 @@ def try_open(api, force_day=False):
         log({"action": "skip_open", "reason": f"options_trading_level={level}, need 3"})
         return
     pending = [o for o in api.trade.get_orders(GetOrdersRequest(status=QueryOrderStatus.OPEN))
-               if (o.symbol or "").startswith(SYMBOL) or o.order_class == "mleg"]
+               if (o.symbol or "").startswith(UNDERLYINGS) or o.order_class == "mleg"]
     if pending:
         log({"action": "skip_open", "reason": f"{len(pending)} open option order(s) still working"})
         return
 
-    spot = api.spot()
     exp = lc.monthly_expiry_near(today, 90)
-    chain = api.chain(exp, spot * 0.55, spot)
+    try:
+        spot = api.spot(SYMBOL, exp)
+        chain = api.chain(exp, spot * 0.55, spot)
+    except Exception as e:
+        log({"action": "skip_open", "underlying": SYMBOL, "expiration": exp,
+             "reason": f"could not read {SYMBOL} price/chain from Alpaca: {e}"})
+        return
+    if not chain:
+        log({"action": "skip_open", "underlying": SYMBOL, "expiration": exp,
+             "reason": f"Alpaca returned no quoted {SYMBOL} puts for {exp}"})
+        return
     lad, info = pick_ladder(spot, exp, chain)
     if lad is None:
         log({"action": "skip_open", "expiration": exp, "reason": info})
@@ -260,7 +301,7 @@ def try_open(api, force_day=False):
     in_use = strategy_bp_in_use(api, held)
     cap = equity * BP_CAP_PCT
     obp = float(acct.options_buying_power or 0)
-    math_ = {"expiration": exp, "spot": round(spot, 2), "strikes": lad.strikes, "width": lad.width,
+    math_ = {"underlying": SYMBOL, "expiration": exp, "spot": round(spot, 2), "strikes": lad.strikes, "width": lad.width,
              "raw_delta_strikes": lad.raw_strikes, "deltas": info["deltas"],
              "credit": credit, "natural_credit": round(info["natural_credit"], 2),
              "max_profit": round(lad.max_profit(), 2), "breakeven": round(lad.breakeven(), 2),
@@ -290,7 +331,8 @@ def try_open(api, force_day=False):
         log({"action": "open_rejected", **math_, "reason": str(e)})
         return
     with LEDGER.open("a") as fh:
-        fh.write(json.dumps({"status": "open", "opened": today.isoformat(), "order_id": str(order.id),
+        fh.write(json.dumps({"status": "open", "underlying": SYMBOL, "opened": today.isoformat(),
+                             "order_id": str(order.id),
                              "expiration": exp.isoformat(), "strikes": lad.strikes, "symbols": syms,
                              "credit": credit, "breakeven": lad.breakeven(),
                              "max_profit": lad.max_profit(), "fill_confirmed": False}) + "\n")
@@ -302,9 +344,10 @@ def check_stops(api):
     ladders, held = open_ladders(api)
     if not ladders:
         return
-    spot = api.spot()
     all_l = ledger()
     for L in ladders:
+        und = L.get("underlying", "SPY")
+        spot = api.spot(und, date.fromisoformat(L["expiration"]))
         if spot >= L["breakeven"]:
             continue
         s = L["symbols"]
@@ -313,7 +356,7 @@ def check_stops(api):
                 (s[2], OrderSide.SELL, 1, PositionIntent.SELL_TO_CLOSE),
                 (s[3], OrderSide.BUY, 2, PositionIntent.BUY_TO_CLOSE)]
         base = {"expiration": L["expiration"], "strikes": L["strikes"], "breakeven": L["breakeven"],
-                "reason": f"SPY {spot:.2f} below breakeven {L['breakeven']:.2f}"}
+                "reason": f"{und} {spot:.2f} below breakeven {L['breakeven']:.2f}"}
         if not APPROVED:
             log({"action": "would_stop", **base})
             continue
@@ -358,9 +401,16 @@ def reconcile_fills(api):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force-day", action="store_true", help="run the Friday entry logic today (testing)")
+    ap.add_argument("--underlying", choices=UNDERLYINGS, help="override LADDER_UNDERLYING for this run")
+    ap.add_argument("--bp-cap-pct", type=float, help="override LADDER_BP_CAP_PCT for this run")
     args = ap.parse_args()
+    global SYMBOL, BP_CAP_PCT
+    if args.underlying:
+        SYMBOL = args.underlying
+    if args.bp_cap_pct is not None:
+        BP_CAP_PCT = args.bp_cap_pct / 100.0
     api = Alpaca()
-    log({"action": "check", "reason": f"mode={MODE} approved={APPROVED} bp_cap={BP_CAP_PCT:.0%}"})
+    log({"action": "check", "reason": f"underlying={SYMBOL} mode={MODE} approved={APPROVED} bp_cap={BP_CAP_PCT:.0%}"})
     reconcile_fills(api)
     if MODE == "stop":
         check_stops(api)

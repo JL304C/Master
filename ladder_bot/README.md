@@ -37,6 +37,15 @@ Known risk: Alpaca rejects mleg orders containing an uncovered short leg, and
 this ladder has one. If that happens, the bot logs `open_rejected` with
 Alpaca's message and does nothing else.
 
+## XSP instead of SPY
+
+`python ladder_bot.py --force-day --underlying XSP` (or `LADDER_UNDERLYING=XSP`
+in `.env`) builds the same ladder on XSP, the Mini-SPX index (SPX/10):
+cash-settled, European-style, so no early assignment and no shares at expiry.
+Alpaca has no quote for the index itself, so the bot infers XSP's level from
+put-call parity on XSP's own options. The buying-power cap counts SPY and XSP
+ladders together; `--bp-cap-pct` overrides the cap for one run.
+
 ## Setup
 
 ```
