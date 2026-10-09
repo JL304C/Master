@@ -3,3 +3,6 @@
 __pycache__/
 gpc_wheel_bot/gpc_wheel_log.jsonl
 gpc_wheel_bot/gpc_wheel_trades.csv
+ladder_bot/ladder_log.jsonl
+ladder_bot/ladder_trades.csv
+ladder_bot/ladder_ledger.jsonl

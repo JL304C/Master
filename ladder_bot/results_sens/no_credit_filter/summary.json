@@ -1,0 +1,937 @@
+{
+  "skew_per_sd": 0.3,
+  "slip": 0.02,
+  "slip_stressed": 0.05,
+  "credit_filter": false,
+  "entries_taken": 990,
+  "entries_skipped_no_credit": 0,
+  "variants": {
+    "hold": {
+      "trades": 979,
+      "win_rate_pct": 87.1,
+      "avg_win": 84.99,
+      "avg_loss": -225.6,
+      "largest_loss": -3997.96,
+      "largest_loss_at_todays_spy_size": -12899.73,
+      "avg_loss_pct_of_cash_secured": -1.5,
+      "total_pnl": 44067.38,
+      "avg_pnl_per_ladder": 45.01,
+      "realized_max_drawdown": -14889.42,
+      "avg_cash_secured_bp_per_ladder": 22640,
+      "avg_regt_margin_per_ladder": 2583,
+      "return_per_trade_on_cash_secured_pct": 0.199,
+      "return_per_trade_on_regt_pct": 1.743,
+      "max_drawdown_mark_to_market": -46392.26,
+      "peak_concurrent_cash_secured_bp": 910100,
+      "peak_concurrent_regt_margin": 102491,
+      "account_needed_at_bp_cap_cash_secured": 4550500,
+      "account_needed_at_bp_cap_regt": 512455,
+      "annualized_return_on_avg_cash_secured_bp_pct": 0.8,
+      "annualized_return_on_avg_regt_margin_pct": 7.02,
+      "loss_episodes": [
+        {
+          "first_close": "2007-12-21",
+          "losing_trades": 1,
+          "total_loss": -7.33,
+          "worst": -7.33,
+          "last_close": "2007-12-21"
+        },
+        {
+          "first_close": "2008-02-15",
+          "losing_trades": 1,
+          "total_loss": -5.25,
+          "worst": -5.25,
+          "last_close": "2008-02-15"
+        },
+        {
+          "first_close": "2008-06-20",
+          "losing_trades": 3,
+          "total_loss": -23.18,
+          "worst": -14.2,
+          "last_close": "2008-06-20"
+        },
+        {
+          "first_close": "2008-09-19",
+          "losing_trades": 14,
+          "total_loss": -11975.53,
+          "worst": -2160.98,
+          "last_close": "2009-02-20"
+        },
+        {
+          "first_close": "2009-04-17",
+          "losing_trades": 14,
+          "total_loss": -101.92,
+          "worst": -31.87,
+          "last_close": "2009-10-16"
+        },
+        {
+          "first_close": "2010-01-15",
+          "losing_trades": 3,
+          "total_loss": -61.29,
+          "worst": -31.71,
+          "last_close": "2010-02-19"
+        },
+        {
+          "first_close": "2010-05-21",
+          "losing_trades": 3,
+          "total_loss": -16.24,
+          "worst": -7.74,
+          "last_close": "2010-06-18"
+        },
+        {
+          "first_close": "2010-08-20",
+          "losing_trades": 8,
+          "total_loss": -90.9,
+          "worst": -15.78,
+          "last_close": "2010-11-19"
+        },
+        {
+          "first_close": "2011-02-18",
+          "losing_trades": 1,
+          "total_loss": -12.19,
+          "worst": -12.19,
+          "last_close": "2011-02-18"
+        },
+        {
+          "first_close": "2011-05-20",
+          "losing_trades": 2,
+          "total_loss": -18.93,
+          "worst": -16.72,
+          "last_close": "2011-06-17"
+        },
+        {
+          "first_close": "2011-09-16",
+          "losing_trades": 11,
+          "total_loss": -112.34,
+          "worst": -22.49,
+          "last_close": "2012-01-20"
+        },
+        {
+          "first_close": "2012-03-16",
+          "losing_trades": 8,
+          "total_loss": -47.1,
+          "worst": -12.72,
+          "last_close": "2012-08-17"
+        },
+        {
+          "first_close": "2012-11-16",
+          "losing_trades": 6,
+          "total_loss": -49.88,
+          "worst": -13.56,
+          "last_close": "2013-01-18"
+        },
+        {
+          "first_close": "2013-03-15",
+          "losing_trades": 4,
+          "total_loss": -35.65,
+          "worst": -13.25,
+          "last_close": "2013-04-19"
+        },
+        {
+          "first_close": "2013-06-21",
+          "losing_trades": 11,
+          "total_loss": -64.87,
+          "worst": -17.16,
+          "last_close": "2013-11-15"
+        },
+        {
+          "first_close": "2014-01-17",
+          "losing_trades": 1,
+          "total_loss": -2.79,
+          "worst": -2.79,
+          "last_close": "2014-01-17"
+        },
+        {
+          "first_close": "2014-03-21",
+          "losing_trades": 1,
+          "total_loss": -6.33,
+          "worst": -6.33,
+          "last_close": "2014-03-21"
+        },
+        {
+          "first_close": "2014-06-20",
+          "losing_trades": 1,
+          "total_loss": -0.05,
+          "worst": -0.05,
+          "last_close": "2014-06-20"
+        },
+        {
+          "first_close": "2014-09-19",
+          "losing_trades": 2,
+          "total_loss": -4.78,
+          "worst": -3.24,
+          "last_close": "2014-10-17"
+        },
+        {
+          "first_close": "2014-12-19",
+          "losing_trades": 1,
+          "total_loss": -0.13,
+          "worst": -0.13,
+          "last_close": "2014-12-19"
+        },
+        {
+          "first_close": "2015-02-20",
+          "losing_trades": 2,
+          "total_loss": -6.95,
+          "worst": -5.0,
+          "last_close": "2015-02-20"
+        },
+        {
+          "first_close": "2015-05-15",
+          "losing_trades": 2,
+          "total_loss": -11.78,
+          "worst": -8.66,
+          "last_close": "2015-06-19"
+        },
+        {
+          "first_close": "2015-10-16",
+          "losing_trades": 2,
+          "total_loss": -4.61,
+          "worst": -3.25,
+          "last_close": "2015-10-16"
+        },
+        {
+          "first_close": "2016-04-15",
+          "losing_trades": 1,
+          "total_loss": -5.42,
+          "worst": -5.42,
+          "last_close": "2016-04-15"
+        },
+        {
+          "first_close": "2016-07-15",
+          "losing_trades": 9,
+          "total_loss": -38.39,
+          "worst": -10.9,
+          "last_close": "2016-12-16"
+        },
+        {
+          "first_close": "2017-03-17",
+          "losing_trades": 1,
+          "total_loss": -1.92,
+          "worst": -1.92,
+          "last_close": "2017-03-17"
+        },
+        {
+          "first_close": "2017-07-21",
+          "losing_trades": 4,
+          "total_loss": -9.65,
+          "worst": -5.23,
+          "last_close": "2017-09-15"
+        },
+        {
+          "first_close": "2017-11-17",
+          "losing_trades": 2,
+          "total_loss": -4.8,
+          "worst": -2.89,
+          "last_close": "2017-12-15"
+        },
+        {
+          "first_close": "2018-12-21",
+          "losing_trades": 3,
+          "total_loss": -816.56,
+          "worst": -407.22,
+          "last_close": "2018-12-21"
+        },
+        {
+          "first_close": "2020-03-20",
+          "losing_trades": 4,
+          "total_loss": -14889.42,
+          "worst": -3997.96,
+          "last_close": "2020-03-20"
+        }
+      ],
+      "by_expiration_year": {
+        "2008": {
+          "trades": 52,
+          "win_rate_pct": 69.2,
+          "avg_win": 188.33,
+          "avg_loss": -748.6,
+          "largest_loss": -2160.98,
+          "largest_loss_at_todays_spy_size": -12899.73,
+          "avg_loss_pct_of_cash_secured": -7.56,
+          "total_pnl": -5197.86,
+          "avg_pnl_per_ladder": -99.96,
+          "realized_max_drawdown": -11940.99,
+          "avg_cash_secured_bp_per_ladder": 10444,
+          "avg_regt_margin_per_ladder": 1227,
+          "return_per_trade_on_cash_secured_pct": -0.957,
+          "return_per_trade_on_regt_pct": -8.145
+        },
+        "2020": {
+          "trades": 52,
+          "win_rate_pct": 92.3,
+          "avg_win": 201.34,
+          "avg_loss": -3722.36,
+          "largest_loss": -3997.96,
+          "largest_loss_at_todays_spy_size": -9583.54,
+          "avg_loss_pct_of_cash_secured": -13.97,
+          "total_pnl": -5225.33,
+          "avg_pnl_per_ladder": -100.49,
+          "realized_max_drawdown": -14889.42,
+          "avg_cash_secured_bp_per_ladder": 23590,
+          "avg_regt_margin_per_ladder": 2775,
+          "return_per_trade_on_cash_secured_pct": -0.426,
+          "return_per_trade_on_regt_pct": -3.621
+        },
+        "2022": {
+          "trades": 52,
+          "win_rate_pct": 100.0,
+          "avg_win": 289.08,
+          "avg_loss": 0,
+          "largest_loss": 25.77,
+          "largest_loss_at_todays_spy_size": 44.73,
+          "avg_loss_pct_of_cash_secured": 0.0,
+          "total_pnl": 15032.07,
+          "avg_pnl_per_ladder": 289.08,
+          "realized_max_drawdown": 0.0,
+          "avg_cash_secured_bp_per_ladder": 32727,
+          "avg_regt_margin_per_ladder": 3819,
+          "return_per_trade_on_cash_secured_pct": 0.883,
+          "return_per_trade_on_regt_pct": 7.569
+        },
+        "2025": {
+          "trades": 52,
+          "win_rate_pct": 100.0,
+          "avg_win": 233.53,
+          "avg_loss": 0,
+          "largest_loss": 40.02,
+          "largest_loss_at_todays_spy_size": 49.36,
+          "avg_loss_pct_of_cash_secured": 0.0,
+          "total_pnl": 12143.54,
+          "avg_pnl_per_ladder": 233.53,
+          "realized_max_drawdown": 0.0,
+          "avg_cash_secured_bp_per_ladder": 48338,
+          "avg_regt_margin_per_ladder": 5477,
+          "return_per_trade_on_cash_secured_pct": 0.483,
+          "return_per_trade_on_regt_pct": 4.264
+        }
+      },
+      "open_trades": 11
+    },
+    "stop_touch": {
+      "trades": 979,
+      "win_rate_pct": 85.4,
+      "avg_win": 67.32,
+      "avg_loss": -210.45,
+      "largest_loss": -2580.6,
+      "largest_loss_at_todays_spy_size": -5138.36,
+      "avg_loss_pct_of_cash_secured": -0.99,
+      "total_pnl": 26188.65,
+      "avg_pnl_per_ladder": 26.75,
+      "realized_max_drawdown": -14371.86,
+      "avg_cash_secured_bp_per_ladder": 22640,
+      "avg_regt_margin_per_ladder": 2583,
+      "return_per_trade_on_cash_secured_pct": 0.118,
+      "return_per_trade_on_regt_pct": 1.036,
+      "max_drawdown_mark_to_market": -16511.56,
+      "peak_concurrent_cash_secured_bp": 910100,
+      "peak_concurrent_regt_margin": 102491,
+      "account_needed_at_bp_cap_cash_secured": 4550500,
+      "account_needed_at_bp_cap_regt": 512455,
+      "annualized_return_on_avg_cash_secured_bp_pct": 0.48,
+      "annualized_return_on_avg_regt_margin_pct": 4.21,
+      "loss_episodes": [
+        {
+          "first_close": "2007-12-21",
+          "losing_trades": 1,
+          "total_loss": -7.33,
+          "worst": -7.33,
+          "last_close": "2007-12-21"
+        },
+        {
+          "first_close": "2008-02-15",
+          "losing_trades": 1,
+          "total_loss": -5.25,
+          "worst": -5.25,
+          "last_close": "2008-02-15"
+        },
+        {
+          "first_close": "2008-06-20",
+          "losing_trades": 3,
+          "total_loss": -23.18,
+          "worst": -14.2,
+          "last_close": "2008-06-20"
+        },
+        {
+          "first_close": "2008-09-19",
+          "losing_trades": 15,
+          "total_loss": -5356.62,
+          "worst": -687.43,
+          "last_close": "2008-11-21"
+        },
+        {
+          "first_close": "2009-01-16",
+          "losing_trades": 2,
+          "total_loss": -26.3,
+          "worst": -15.63,
+          "last_close": "2009-02-20"
+        },
+        {
+          "first_close": "2009-04-17",
+          "losing_trades": 14,
+          "total_loss": -101.92,
+          "worst": -31.87,
+          "last_close": "2009-10-16"
+        },
+        {
+          "first_close": "2010-01-15",
+          "losing_trades": 3,
+          "total_loss": -61.29,
+          "worst": -31.71,
+          "last_close": "2010-02-19"
+        },
+        {
+          "first_close": "2010-05-21",
+          "losing_trades": 3,
+          "total_loss": -16.24,
+          "worst": -7.74,
+          "last_close": "2010-06-18"
+        },
+        {
+          "first_close": "2010-08-20",
+          "losing_trades": 8,
+          "total_loss": -90.9,
+          "worst": -15.78,
+          "last_close": "2010-11-19"
+        },
+        {
+          "first_close": "2011-02-18",
+          "losing_trades": 1,
+          "total_loss": -12.19,
+          "worst": -12.19,
+          "last_close": "2011-02-18"
+        },
+        {
+          "first_close": "2011-05-20",
+          "losing_trades": 2,
+          "total_loss": -18.93,
+          "worst": -16.72,
+          "last_close": "2011-06-17"
+        },
+        {
+          "first_close": "2011-09-16",
+          "losing_trades": 12,
+          "total_loss": -274.53,
+          "worst": -162.19,
+          "last_close": "2012-01-20"
+        },
+        {
+          "first_close": "2012-03-16",
+          "losing_trades": 8,
+          "total_loss": -47.1,
+          "worst": -12.72,
+          "last_close": "2012-08-17"
+        },
+        {
+          "first_close": "2012-11-16",
+          "losing_trades": 6,
+          "total_loss": -49.88,
+          "worst": -13.56,
+          "last_close": "2013-01-18"
+        },
+        {
+          "first_close": "2013-03-15",
+          "losing_trades": 4,
+          "total_loss": -35.65,
+          "worst": -13.25,
+          "last_close": "2013-04-19"
+        },
+        {
+          "first_close": "2013-06-21",
+          "losing_trades": 11,
+          "total_loss": -64.87,
+          "worst": -17.16,
+          "last_close": "2013-11-15"
+        },
+        {
+          "first_close": "2014-01-17",
+          "losing_trades": 1,
+          "total_loss": -2.79,
+          "worst": -2.79,
+          "last_close": "2014-01-17"
+        },
+        {
+          "first_close": "2014-03-21",
+          "losing_trades": 1,
+          "total_loss": -6.33,
+          "worst": -6.33,
+          "last_close": "2014-03-21"
+        },
+        {
+          "first_close": "2014-06-20",
+          "losing_trades": 1,
+          "total_loss": -0.05,
+          "worst": -0.05,
+          "last_close": "2014-06-20"
+        },
+        {
+          "first_close": "2014-09-19",
+          "losing_trades": 2,
+          "total_loss": -4.78,
+          "worst": -3.24,
+          "last_close": "2014-10-17"
+        },
+        {
+          "first_close": "2014-12-19",
+          "losing_trades": 1,
+          "total_loss": -0.13,
+          "worst": -0.13,
+          "last_close": "2014-12-19"
+        },
+        {
+          "first_close": "2015-02-20",
+          "losing_trades": 2,
+          "total_loss": -6.95,
+          "worst": -5.0,
+          "last_close": "2015-02-20"
+        },
+        {
+          "first_close": "2015-05-15",
+          "losing_trades": 2,
+          "total_loss": -11.78,
+          "worst": -8.66,
+          "last_close": "2015-06-19"
+        },
+        {
+          "first_close": "2015-10-16",
+          "losing_trades": 2,
+          "total_loss": -4.61,
+          "worst": -3.25,
+          "last_close": "2015-10-16"
+        },
+        {
+          "first_close": "2016-04-15",
+          "losing_trades": 1,
+          "total_loss": -5.42,
+          "worst": -5.42,
+          "last_close": "2016-04-15"
+        },
+        {
+          "first_close": "2016-07-15",
+          "losing_trades": 9,
+          "total_loss": -38.39,
+          "worst": -10.9,
+          "last_close": "2016-12-16"
+        },
+        {
+          "first_close": "2017-03-17",
+          "losing_trades": 1,
+          "total_loss": -1.92,
+          "worst": -1.92,
+          "last_close": "2017-03-17"
+        },
+        {
+          "first_close": "2017-07-21",
+          "losing_trades": 4,
+          "total_loss": -9.65,
+          "worst": -5.23,
+          "last_close": "2017-09-15"
+        },
+        {
+          "first_close": "2017-11-17",
+          "losing_trades": 2,
+          "total_loss": -4.8,
+          "worst": -2.89,
+          "last_close": "2017-12-15"
+        },
+        {
+          "first_close": "2018-12-21",
+          "losing_trades": 3,
+          "total_loss": -816.56,
+          "worst": -407.22,
+          "last_close": "2018-12-21"
+        },
+        {
+          "first_close": "2020-03-13",
+          "losing_trades": 11,
+          "total_loss": -14371.86,
+          "worst": -2241.43,
+          "last_close": "2020-03-13"
+        },
+        {
+          "first_close": "2025-04-11",
+          "losing_trades": 6,
+          "total_loss": -8616.6,
+          "worst": -2580.6,
+          "last_close": "2025-04-11"
+        }
+      ],
+      "by_expiration_year": {
+        "2008": {
+          "trades": 52,
+          "win_rate_pct": 63.5,
+          "avg_win": 181.76,
+          "avg_loss": -283.42,
+          "largest_loss": -687.43,
+          "largest_loss_at_todays_spy_size": -4219.39,
+          "avg_loss_pct_of_cash_secured": -3.01,
+          "total_pnl": 612.95,
+          "avg_pnl_per_ladder": 11.79,
+          "realized_max_drawdown": -5356.62,
+          "avg_cash_secured_bp_per_ladder": 10444,
+          "avg_regt_margin_per_ladder": 1227,
+          "return_per_trade_on_cash_secured_pct": 0.113,
+          "return_per_trade_on_regt_pct": 0.96
+        },
+        "2020": {
+          "trades": 52,
+          "win_rate_pct": 78.8,
+          "avg_win": 35.67,
+          "avg_loss": -1306.53,
+          "largest_loss": -2241.43,
+          "largest_loss_at_todays_spy_size": -5138.36,
+          "avg_loss_pct_of_cash_secured": -4.86,
+          "total_pnl": -12909.47,
+          "avg_pnl_per_ladder": -248.26,
+          "realized_max_drawdown": -14371.86,
+          "avg_cash_secured_bp_per_ladder": 23590,
+          "avg_regt_margin_per_ladder": 2775,
+          "return_per_trade_on_cash_secured_pct": -1.052,
+          "return_per_trade_on_regt_pct": -8.946
+        },
+        "2022": {
+          "trades": 52,
+          "win_rate_pct": 100.0,
+          "avg_win": 289.08,
+          "avg_loss": 0,
+          "largest_loss": 25.77,
+          "largest_loss_at_todays_spy_size": 44.73,
+          "avg_loss_pct_of_cash_secured": 0.0,
+          "total_pnl": 15032.07,
+          "avg_pnl_per_ladder": 289.08,
+          "realized_max_drawdown": 0.0,
+          "avg_cash_secured_bp_per_ladder": 32727,
+          "avg_regt_margin_per_ladder": 3819,
+          "return_per_trade_on_cash_secured_pct": 0.883,
+          "return_per_trade_on_regt_pct": 7.569
+        },
+        "2025": {
+          "trades": 52,
+          "win_rate_pct": 88.5,
+          "avg_win": 107.36,
+          "avg_loss": -1436.1,
+          "largest_loss": -2580.6,
+          "largest_loss_at_todays_spy_size": -3275.72,
+          "avg_loss_pct_of_cash_secured": -2.9,
+          "total_pnl": -3678.19,
+          "avg_pnl_per_ladder": -70.73,
+          "realized_max_drawdown": -8616.6,
+          "avg_cash_secured_bp_per_ladder": 48338,
+          "avg_regt_margin_per_ladder": 5477,
+          "return_per_trade_on_cash_secured_pct": -0.146,
+          "return_per_trade_on_regt_pct": -1.291
+        }
+      },
+      "open_trades": 11
+    },
+    "stop_close": {
+      "trades": 979,
+      "win_rate_pct": 86.2,
+      "avg_win": 75.74,
+      "avg_loss": -379.48,
+      "largest_loss": -4394.8,
+      "largest_loss_at_todays_spy_size": -10199.31,
+      "avg_loss_pct_of_cash_secured": -2.02,
+      "total_pnl": 12697.19,
+      "avg_pnl_per_ladder": 12.97,
+      "realized_max_drawdown": -38222.84,
+      "avg_cash_secured_bp_per_ladder": 22640,
+      "avg_regt_margin_per_ladder": 2583,
+      "return_per_trade_on_cash_secured_pct": 0.057,
+      "return_per_trade_on_regt_pct": 0.502,
+      "max_drawdown_mark_to_market": -40362.53,
+      "peak_concurrent_cash_secured_bp": 910100,
+      "peak_concurrent_regt_margin": 102491,
+      "account_needed_at_bp_cap_cash_secured": 4550500,
+      "account_needed_at_bp_cap_regt": 512455,
+      "annualized_return_on_avg_cash_secured_bp_pct": 0.23,
+      "annualized_return_on_avg_regt_margin_pct": 2.03,
+      "loss_episodes": [
+        {
+          "first_close": "2007-12-21",
+          "losing_trades": 1,
+          "total_loss": -7.33,
+          "worst": -7.33,
+          "last_close": "2007-12-21"
+        },
+        {
+          "first_close": "2008-02-15",
+          "losing_trades": 1,
+          "total_loss": -5.25,
+          "worst": -5.25,
+          "last_close": "2008-02-15"
+        },
+        {
+          "first_close": "2008-06-20",
+          "losing_trades": 3,
+          "total_loss": -23.18,
+          "worst": -14.2,
+          "last_close": "2008-06-20"
+        },
+        {
+          "first_close": "2008-09-19",
+          "losing_trades": 14,
+          "total_loss": -11418.81,
+          "worst": -1406.58,
+          "last_close": "2008-11-14"
+        },
+        {
+          "first_close": "2009-01-16",
+          "losing_trades": 2,
+          "total_loss": -26.3,
+          "worst": -15.63,
+          "last_close": "2009-02-20"
+        },
+        {
+          "first_close": "2009-04-17",
+          "losing_trades": 14,
+          "total_loss": -101.92,
+          "worst": -31.87,
+          "last_close": "2009-10-16"
+        },
+        {
+          "first_close": "2010-01-15",
+          "losing_trades": 3,
+          "total_loss": -61.29,
+          "worst": -31.71,
+          "last_close": "2010-02-19"
+        },
+        {
+          "first_close": "2010-05-21",
+          "losing_trades": 3,
+          "total_loss": -16.24,
+          "worst": -7.74,
+          "last_close": "2010-06-18"
+        },
+        {
+          "first_close": "2010-08-20",
+          "losing_trades": 8,
+          "total_loss": -90.9,
+          "worst": -15.78,
+          "last_close": "2010-11-19"
+        },
+        {
+          "first_close": "2011-02-18",
+          "losing_trades": 1,
+          "total_loss": -12.19,
+          "worst": -12.19,
+          "last_close": "2011-02-18"
+        },
+        {
+          "first_close": "2011-05-20",
+          "losing_trades": 2,
+          "total_loss": -18.93,
+          "worst": -16.72,
+          "last_close": "2011-06-17"
+        },
+        {
+          "first_close": "2011-09-16",
+          "losing_trades": 11,
+          "total_loss": -112.34,
+          "worst": -22.49,
+          "last_close": "2012-01-20"
+        },
+        {
+          "first_close": "2012-03-16",
+          "losing_trades": 8,
+          "total_loss": -47.1,
+          "worst": -12.72,
+          "last_close": "2012-08-17"
+        },
+        {
+          "first_close": "2012-11-16",
+          "losing_trades": 6,
+          "total_loss": -49.88,
+          "worst": -13.56,
+          "last_close": "2013-01-18"
+        },
+        {
+          "first_close": "2013-03-15",
+          "losing_trades": 4,
+          "total_loss": -35.65,
+          "worst": -13.25,
+          "last_close": "2013-04-19"
+        },
+        {
+          "first_close": "2013-06-21",
+          "losing_trades": 11,
+          "total_loss": -64.87,
+          "worst": -17.16,
+          "last_close": "2013-11-15"
+        },
+        {
+          "first_close": "2014-01-17",
+          "losing_trades": 1,
+          "total_loss": -2.79,
+          "worst": -2.79,
+          "last_close": "2014-01-17"
+        },
+        {
+          "first_close": "2014-03-21",
+          "losing_trades": 1,
+          "total_loss": -6.33,
+          "worst": -6.33,
+          "last_close": "2014-03-21"
+        },
+        {
+          "first_close": "2014-06-20",
+          "losing_trades": 1,
+          "total_loss": -0.05,
+          "worst": -0.05,
+          "last_close": "2014-06-20"
+        },
+        {
+          "first_close": "2014-09-19",
+          "losing_trades": 2,
+          "total_loss": -4.78,
+          "worst": -3.24,
+          "last_close": "2014-10-17"
+        },
+        {
+          "first_close": "2014-12-19",
+          "losing_trades": 1,
+          "total_loss": -0.13,
+          "worst": -0.13,
+          "last_close": "2014-12-19"
+        },
+        {
+          "first_close": "2015-02-20",
+          "losing_trades": 2,
+          "total_loss": -6.95,
+          "worst": -5.0,
+          "last_close": "2015-02-20"
+        },
+        {
+          "first_close": "2015-05-15",
+          "losing_trades": 2,
+          "total_loss": -11.78,
+          "worst": -8.66,
+          "last_close": "2015-06-19"
+        },
+        {
+          "first_close": "2015-10-16",
+          "losing_trades": 2,
+          "total_loss": -4.61,
+          "worst": -3.25,
+          "last_close": "2015-10-16"
+        },
+        {
+          "first_close": "2016-04-15",
+          "losing_trades": 1,
+          "total_loss": -5.42,
+          "worst": -5.42,
+          "last_close": "2016-04-15"
+        },
+        {
+          "first_close": "2016-07-15",
+          "losing_trades": 9,
+          "total_loss": -38.39,
+          "worst": -10.9,
+          "last_close": "2016-12-16"
+        },
+        {
+          "first_close": "2017-03-17",
+          "losing_trades": 1,
+          "total_loss": -1.92,
+          "worst": -1.92,
+          "last_close": "2017-03-17"
+        },
+        {
+          "first_close": "2017-07-21",
+          "losing_trades": 4,
+          "total_loss": -9.65,
+          "worst": -5.23,
+          "last_close": "2017-09-15"
+        },
+        {
+          "first_close": "2017-11-17",
+          "losing_trades": 2,
+          "total_loss": -4.8,
+          "worst": -2.89,
+          "last_close": "2017-12-15"
+        },
+        {
+          "first_close": "2018-12-21",
+          "losing_trades": 3,
+          "total_loss": -816.56,
+          "worst": -407.22,
+          "last_close": "2018-12-21"
+        },
+        {
+          "first_close": "2020-03-13",
+          "losing_trades": 11,
+          "total_loss": -38222.84,
+          "worst": -4394.8,
+          "last_close": "2020-03-20"
+        }
+      ],
+      "by_expiration_year": {
+        "2008": {
+          "trades": 52,
+          "win_rate_pct": 65.4,
+          "avg_win": 188.66,
+          "avg_loss": -635.96,
+          "largest_loss": -1406.58,
+          "largest_loss_at_todays_spy_size": -8396.41,
+          "avg_loss_pct_of_cash_secured": -6.54,
+          "total_pnl": -5032.93,
+          "avg_pnl_per_ladder": -96.79,
+          "realized_max_drawdown": -11418.81,
+          "avg_cash_secured_bp_per_ladder": 10444,
+          "avg_regt_margin_per_ladder": 1227,
+          "return_per_trade_on_cash_secured_pct": -0.927,
+          "return_per_trade_on_regt_pct": -7.886
+        },
+        "2020": {
+          "trades": 52,
+          "win_rate_pct": 78.8,
+          "avg_win": 35.67,
+          "avg_loss": -3474.8,
+          "largest_loss": -4394.8,
+          "largest_loss_at_todays_spy_size": -10199.31,
+          "avg_loss_pct_of_cash_secured": -13.0,
+          "total_pnl": -36760.45,
+          "avg_pnl_per_ladder": -706.93,
+          "realized_max_drawdown": -38222.84,
+          "avg_cash_secured_bp_per_ladder": 23590,
+          "avg_regt_margin_per_ladder": 2775,
+          "return_per_trade_on_cash_secured_pct": -2.997,
+          "return_per_trade_on_regt_pct": -25.475
+        },
+        "2022": {
+          "trades": 52,
+          "win_rate_pct": 100.0,
+          "avg_win": 289.08,
+          "avg_loss": 0,
+          "largest_loss": 25.77,
+          "largest_loss_at_todays_spy_size": 44.73,
+          "avg_loss_pct_of_cash_secured": 0.0,
+          "total_pnl": 15032.07,
+          "avg_pnl_per_ladder": 289.08,
+          "realized_max_drawdown": 0.0,
+          "avg_cash_secured_bp_per_ladder": 32727,
+          "avg_regt_margin_per_ladder": 3819,
+          "return_per_trade_on_cash_secured_pct": 0.883,
+          "return_per_trade_on_regt_pct": 7.569
+        },
+        "2025": {
+          "trades": 52,
+          "win_rate_pct": 100.0,
+          "avg_win": 233.53,
+          "avg_loss": 0,
+          "largest_loss": 40.02,
+          "largest_loss_at_todays_spy_size": 49.36,
+          "avg_loss_pct_of_cash_secured": 0.0,
+          "total_pnl": 12143.54,
+          "avg_pnl_per_ladder": 233.53,
+          "realized_max_drawdown": 0.0,
+          "avg_cash_secured_bp_per_ladder": 48338,
+          "avg_regt_margin_per_ladder": 5477,
+          "return_per_trade_on_cash_secured_pct": 0.483,
+          "return_per_trade_on_regt_pct": 4.264
+        }
+      },
+      "open_trades": 11
+    }
+  }
+}
