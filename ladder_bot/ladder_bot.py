@@ -131,6 +131,30 @@ class Alpaca:
         return out
 
 
+def snap_equal_spacing(raw, strikes, max_shift=2):
+    """Equal-spaced (K1, K2, K3, K4) using only strikes that exist in the chain.
+    Far-OTM SPY strikes at ~90 DTE are often $5 apart, so the ideal spacing
+    (raw K1 - raw K4) / 3 is snapped to whatever the chain allows. K4 may move
+    up to `max_shift` listed strikes from the 10-delta strike; the set closest
+    to the delta-chosen strikes wins."""
+    have = set(strikes)
+    i4 = strikes.index(raw[3])
+    ideal_w = (raw[0] - raw[3]) / 3.0
+    best, best_score = None, None
+    for k4 in strikes[max(0, i4 - max_shift): i4 + max_shift + 1]:
+        for k3 in strikes:
+            w = k3 - k4
+            if w <= 0 or w > 2 * ideal_w + 5:
+                continue
+            ks = (k4 + 3 * w, k4 + 2 * w, k4 + w, k4)
+            if not all(k in have for k in ks):
+                continue
+            score = sum(abs(a - b) for a, b in zip(ks, raw))
+            if best_score is None or score < best_score:
+                best, best_score = ks, score
+    return best
+
+
 def pick_ladder(spot: float, exp: date, chain: dict, r=0.04, q=0.013):
     """Delta first (Alpaca's greeks; Black-Scholes from the contract's own IV
     as fallback), then snap to equal spacing on strikes that actually exist."""
@@ -148,12 +172,11 @@ def pick_ladder(spot: float, exp: date, chain: dict, r=0.04, q=0.013):
     if not deltas:
         return None, "no deltas/IV in chain"
     raw = [min(deltas, key=lambda k: abs(deltas[k] - t)) for t in lc.TARGET_DELTAS]
-    k4 = raw[3]
-    w = max(STRIKE_INC, round((raw[0] - k4) / 3.0 / STRIKE_INC) * STRIKE_INC)
-    ks = (k4 + 3 * w, k4 + 2 * w, k4 + w, k4)
-    missing = [k for k in ks if k not in chain]
-    if missing:
-        return None, f"equal-spaced strikes {ks} not all quoted (missing {missing})"
+    ks = snap_equal_spacing(raw, sorted(chain))
+    if ks is None:
+        return None, (f"no equally spaced set of quoted strikes near delta strikes {raw}; "
+                      f"quoted strikes {min(chain):g}-{max(chain):g}: {sorted(chain)[:60]}")
+    w = ks[0] - ks[1]
     mid_credit = -sum(rr * chain[k]["mid"] for rr, k in zip(lc.RATIOS, ks))
     natural = -sum(rr * (chain[k]["ask"] if rr > 0 else chain[k]["bid"]) for rr, k in zip(lc.RATIOS, ks))
     lad = lc.Ladder(*ks, width=w, credit=mid_credit, raw_strikes=tuple(raw))
