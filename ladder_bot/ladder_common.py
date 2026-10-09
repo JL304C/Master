@@ -136,11 +136,12 @@ class Ladder:
         return {f"pnl_if_down_{int(d * 100)}pct": round(self.payoff(spot * (1 - d)), 2) for d in drops}
 
     def cash_secured_requirement(self) -> float:
-        """Cash needed if the extra short K4 put must be cash-secured: the most
-        the legs can lose at expiration (SPY -> 0), premium left out -- the
-        same "universal spread rule" Alpaca applies to multi-leg orders.
-        = -(K1 - K2 + K3 - 2*K4) x 100 = (K4 - 2w) x 100."""
-        return -sum(r * k for r, k in zip(RATIOS, self.strikes)) * MULTIPLIER
+        """Buying power Alpaca actually holds per ladder (observed on paper,
+        Oct 2026): the K1/K2 and K3/K4 debit put spreads need nothing beyond
+        their cost, and the one leftover short K4 put is cash-secured at its
+        FULL strike, less the credit received: K4 x 100 - credit x 100.
+        (Observed: SPY 680 ladder -> $67,968 held; XSP 685 -> $68,500.)"""
+        return (self.k4 - self.credit) * MULTIPLIER
 
     def max_loss_if_zero(self) -> float:
         return self.payoff(0.0)

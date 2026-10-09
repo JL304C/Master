@@ -226,11 +226,32 @@ def open_ladders(api):
     return [L for L in ledger() if L.get("status") == "open" and any(s in held for s in L["symbols"])], held
 
 
+def uncovered_put_requirement(puts: dict) -> float:
+    """puts: {strike: signed qty} for one root+expiration. Alpaca's treatment:
+    each short put covered by a long put at an equal-or-higher strike needs
+    nothing extra (debit spread); every short left uncovered is cash-secured
+    at strike x 100. Shorts are matched from the highest strike down."""
+    longs = sorted(((k, q) for k, q in puts.items() if q > 0), reverse=True)
+    longs = [[k, q] for k, q in longs]
+    need = 0.0
+    for k, q in sorted(((k, -q) for k, q in puts.items() if q < 0), reverse=True):
+        for lg in longs:
+            if q == 0:
+                break
+            if lg[0] >= k and lg[1] > 0:
+                used = min(lg[1], q)
+                lg[1] -= used
+                q -= used
+        need += q * k * lc.MULTIPLIER
+    return need
+
+
 def strategy_bp_in_use(api, held) -> float:
-    """Cash-secured requirement of every SPY/XSP put held (all ladders, both
-    underlyings), per root+expiration: the most those legs can lose at expiry
-    (underlying -> 0), premium excluded."""
-    by_exp = {}
+    """Cash Alpaca holds for every SPY/XSP put position (all ladders, both
+    underlyings), grouped by root+expiration. Credits received are ignored,
+    so this is a few dollars conservative. Pending orders are not counted --
+    try_open already refuses to open while any order is still working."""
+    groups = {}
     for sym, qty in held.items():
         root = next((u for u in UNDERLYINGS if sym.startswith(u)), None)
         if root is None or len(sym) < len(root) + 15:
@@ -238,9 +259,9 @@ def strategy_bp_in_use(api, held) -> float:
         exp, right, k = parse_occ(sym)
         if right != "P":
             continue
-        key = (root, exp)
-        by_exp[key] = by_exp.get(key, 0.0) + qty * k     # payoff at S=0 = sum(qty*K)
-    return sum(max(0.0, -v) * lc.MULTIPLIER for v in by_exp.values())
+        g = groups.setdefault((root, exp), {})
+        g[k] = g.get(k, 0) + qty
+    return sum(uncovered_put_requirement(g) for g in groups.values())
 
 
 def submit_mleg(api, legs, limit_price=None):

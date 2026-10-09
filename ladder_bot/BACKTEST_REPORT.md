@@ -45,11 +45,11 @@ The bigger problem is the **payoff shape**:
 | Largest loss at today's SPY size | −$11,640 | −$5,138 | −$10,199 |
 | Total P&L, 19 years | +$47,378 | +$23,417 | +$13,588 |
 | Max drawdown (weekly mark-to-market) | −$46,392 | −$16,512 | −$40,363 |
-| Avg cash-secured BP per ladder | $24,349 | same | same |
+| Avg cash-secured BP per ladder (K4 × 100 − credit) | $25,883 | same | same |
 | Avg Reg-T margin per ladder (for comparison) | $2,772 | same | same |
-| **Annual return on cash-secured BP** | **0.92%** | 0.46% | 0.27% |
+| **Annual return on cash-secured BP** | **0.86%** | 0.43% | 0.25% |
 | Annual return on Reg-T margin | 8.1% | 4.0% | 2.3% |
-| Peak cash-secured BP, all open ladders | $910,100 | same | same |
+| Peak cash-secured BP, all open ladders | $964,285 | same | same |
 
 The stop variant reduces the drawdown, but it also cuts profit, because it
 locks in losses on selloffs that recover. For example, the April 2025 selloff
@@ -82,7 +82,7 @@ today's dollars, the worst 2008 ladder was −$11.6k.
 - **Max profit:** about $3,898
 - **Breakeven:** about $629 (−18.7%)
 - **SPY −20% → −$982**, −30% → −$8,722, **−40% → −$16,462**
-- **Cash-secured requirement:** $63,000 per ladder
+- **Cash-secured requirement:** about $66,800 per ladder (668 × 100 − credit)
 
 Across the backtest, the average spacing was 2.6% of spot. That matches the
 original's 150 ES points (~3%). The average breakeven sat 20.6% below entry.
@@ -102,8 +102,10 @@ original's 150 ES points (~3%). The average breakeven sat 20.6% below entry.
   - **The 1/1/1/2 mleg order you asked for may be rejected outright.** The bot
     submits it as one mleg (never separate legs), logs any rejection, and
     stops there.
-  - Even if Alpaca accepts it as cash-secured, the requirement is
-    (K4 − 2w) × 100. That's about **$63k per ladder today**.
+  - **Tested on paper (Oct 9 2026): Alpaca accepted the 1/1/1/2 mleg for both
+    SPY and XSP.** It holds the leftover short put cash-secured at its full
+    strike, less the credit: K4 × 100 − credit. That's **about $68k per ladder
+    today** (SPY 680 ladder: $67,968 held; XSP 685: $68,500).
 - **20% buying-power cap:** the strategy reaches about 13 concurrent ladders.
   At today's prices that's about $800k+ of cash-secured BP, so a 20% cap
   needs an account of roughly **$4–5M** to run it as designed. On a $100k
@@ -135,9 +137,9 @@ SPAN futures margin. Alpaca offers neither.
 |---|---|---|---|---|---|---|
 | Base (skew 0.30) | 861 | 98.6% | +$47k | −$46k | 0.9% | 2008, 2018, 2020 |
 | Flatter skew 0.20 (`--skew 0.20`) | 358 | 98.9% | +$8k | −$26k | 0.3% | 2008 ×2, 2020, 2022 |
-| Steeper skew 0.40 (`--skew 0.40`) | 990 | 99.1% | +$104k | −$30k | 2.0% | 2008, 2020 |
+| Steeper skew 0.40 (`--skew 0.40`) | 990 | 99.1% | +$104k | −$30k | 1.9% | 2008, 2020 |
 | No credit filter (`--no-credit-filter`) | 990 | 87.1% | +$44k | −$46k | 0.8% | 2008, 2018, 2020 (+small debits) |
-| Wider slippage $0.05 (`--slip 0.05 --slip-stressed 0.15`) | 564 | 98.6% | +$29k | −$43k | 0.7% | 2008, 2018, 2020 |
+| Wider slippage $0.05 (`--slip 0.05 --slip-stressed 0.15`) | 564 | 98.6% | +$29k | −$43k | 0.6% | 2008, 2018, 2020 |
 
 - **Weekly bars:** stops are only checked weekly (that's all the free data
   allows).
