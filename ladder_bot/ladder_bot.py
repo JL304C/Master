@@ -293,7 +293,7 @@ def try_open(api, force_day=False):
         fh.write(json.dumps({"status": "open", "opened": today.isoformat(), "order_id": str(order.id),
                              "expiration": exp.isoformat(), "strikes": lad.strikes, "symbols": syms,
                              "credit": credit, "breakeven": lad.breakeven(),
-                             "max_profit": lad.max_profit()}) + "\n")
+                             "max_profit": lad.max_profit(), "fill_confirmed": False}) + "\n")
     log({"action": "open_ladder", **math_, "order_id": order.id, "limit_price": -credit})
 
 
@@ -325,12 +325,43 @@ def check_stops(api):
     LEDGER.write_text("".join(json.dumps(x) + "\n" for x in all_l))
 
 
+def reconcile_fills(api):
+    """Replace each new ladder's limit credit with Alpaca's actual fill price
+    (an mleg can fill better than its limit) and recompute breakeven and max
+    profit from it. Ladders whose order died unfilled are marked "unfilled"."""
+    entries = ledger()
+    changed = False
+    for L in entries:
+        if L.get("status") != "open" or L.get("fill_confirmed") is True:   # older entries lack the key
+            continue
+        o = api.trade.get_order_by_id(L["order_id"])
+        status = getattr(o.status, "value", str(o.status))
+        if status == "filled" and o.filled_avg_price is not None:
+            credit = -float(o.filled_avg_price)        # mleg: negative price = credit
+            k = L["strikes"]
+            lad = lc.Ladder(*k, width=k[0] - k[1], credit=credit, raw_strikes=())
+            old = L["credit"]
+            L.update(credit=credit, breakeven=lad.breakeven(), max_profit=lad.max_profit(),
+                     limit_credit=L.get("limit_credit", old), fill_confirmed=True)
+            changed = True
+            log({"action": "fill_confirmed", "order_id": L["order_id"], "expiration": L["expiration"],
+                 "strikes": k, "credit": credit, "max_profit": round(lad.max_profit(), 2),
+                 "breakeven": round(lad.breakeven(), 2), "reason": f"filled at {credit:.2f} credit (limit was {old:.2f})"})
+        elif status in ("canceled", "expired", "rejected") and not float(o.filled_qty or 0):
+            L.update(status="unfilled", fill_confirmed=True)
+            changed = True
+            log({"action": "unfilled", "order_id": L["order_id"], "reason": f"order {status} without a fill"})
+    if changed:
+        LEDGER.write_text("".join(json.dumps(x) + "\n" for x in entries))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force-day", action="store_true", help="run the Friday entry logic today (testing)")
     args = ap.parse_args()
     api = Alpaca()
     log({"action": "check", "reason": f"mode={MODE} approved={APPROVED} bp_cap={BP_CAP_PCT:.0%}"})
+    reconcile_fills(api)
     if MODE == "stop":
         check_stops(api)
     try_open(api, args.force_day)
