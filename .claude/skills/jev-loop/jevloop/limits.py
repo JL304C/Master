@@ -52,7 +52,11 @@ class Limits:
     as_gamma: float = 0.10  # risk aversion
     as_kappa: float = 1.5  # order book liquidity / arrival-rate parameter
     as_horizon_s: float = 60.0  # T - t, the inventory-clearing horizon in seconds
-    min_half_spread_bps: float = 2.0  # quotes never tighter than this each side of mid
+    # quotes never tighter than this each side of mid. Alpaca crypto charges
+    # about 0.15% (15 bps) per fill, so a round trip costs ~30 bps; 25 bps
+    # each side earns ~50 bps per round trip, enough to clear the fees.
+    # At 2 bps every completed round trip lost money to fees.
+    min_half_spread_bps: float = 25.0
     max_half_spread_bps: float = 50.0  # nor wider than this
 
     # --- execution/alpaca.py ---
