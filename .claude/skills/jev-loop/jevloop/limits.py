@@ -62,6 +62,10 @@ class Limits:
     # --- execution/alpaca.py ---
     tick_seconds: float = 2.0  # "block" = one tick of this loop. See README for why 2s.
     rest_ticks: int = 3  # rest a resting quote this many ticks before cancel-replace
+    # ...and only cancel-replace if a price would move at least this much
+    # (in bps of the old price), or a fill / size change means the orders
+    # themselves must change. Otherwise the working orders are left alone.
+    requote_min_move_bps: float = 5.0
     quote_notional_usd: float = 20.0  # dollar target for each side of a quote
     directional_notional_usd: float = (
         20.0  # dollar target for the directional-leg order

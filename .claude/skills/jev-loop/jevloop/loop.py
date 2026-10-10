@@ -969,11 +969,18 @@ def _execute_action(
         fill_qty, fill_price = None, None
         buy_qty = size_order(quote_notional, bid_px, spec)
         sell_qty = size_order(quote_notional, ask_px, spec)
-        # Gas-honesty rule: only cancel-replace every `rest_ticks` ticks.
+        # Gas-honesty rule: only cancel-replace every `rest_ticks` ticks, and
+        # then only if the quotes would actually change.
         rest_counter += 1
-        if resting_quotes is None or rest_counter >= limits.rest_ticks:
+        if (
+            resting_quotes is not None
+            and rest_counter >= limits.rest_ticks
+            and _quotes_still_good(resting_quotes, bid_px, ask_px, inv, quote_notional, limits)
+        ):
+            rest_counter = 0  # leave them working; look again next rest period
+        elif resting_quotes is None or rest_counter >= limits.rest_ticks:
             if dry:
-                resting_quotes = {"bid": bid_px, "ask": ask_px}
+                resting_quotes = _resting(bid_px, ask_px, inv, quote_notional, ("buy", "sell"), ("buy", "sell"))
                 rest_counter = 0
                 fill_txt = f"dry: would quote {buy_qty}/{sell_qty} @ {bid_px:,.2f}/{ask_px:,.2f}"
             else:
@@ -1006,6 +1013,8 @@ def _execute_action(
                     else:
                         notes.append("ask skipped: nothing held to sell")
                     inv.orders_submitted += len(sides)
+                    wanted = tuple(s for s, _, _ in sides)
+                    live = ()
                     for side_, qty_, px_ in sides:
                         o = alpaca.submit_limit_order(side_, qty_, px_)
                         if expected_px is not None and o.get("client_order_id"):
@@ -1013,7 +1022,8 @@ def _execute_action(
                         # Marked resting as soon as one order is live, so a
                         # failure on the other side can't orphan it: it is
                         # cancel-replaced on the next cycle like any quote.
-                        resting_quotes = {"bid": bid_px, "ask": ask_px}
+                        live += (side_,)
+                        resting_quotes = _resting(bid_px, ask_px, inv, quote_notional, wanted, live)
                         rest_counter = 0
                     if not sides:
                         resting_quotes = None  # anything resting was cancelled above
@@ -1100,6 +1110,42 @@ def _execute_action(
         return line_action, fill_txt, fill_qty, fill_price, resting_quotes, rest_counter
 
     return line_action, fill_txt, None, None, resting_quotes, rest_counter
+
+
+def _resting(bid_px, ask_px, inv: InventoryState, notional: float, wanted, live) -> dict:
+    """What is working at the broker now, and what it was priced against."""
+    return {
+        "bid": bid_px,
+        "ask": ask_px,
+        "inventory": inv.inventory,
+        "notional": notional,
+        "wanted": tuple(wanted),
+        "live": tuple(live),
+    }
+
+
+def _quotes_still_good(resting: dict, bid_px, ask_px, inv: InventoryState, notional: float, limits: Limits) -> bool:
+    """True when re-quoting would put back the same orders, so the working
+    ones should be left alone. The first published version cancelled and
+    re-placed every rest period even at an identical price: hundreds of
+    cancelled orders in the account history, Alpaca calls spent for
+    nothing, and the order's place in the queue thrown away each time.
+
+    Re-quote when a price moved at least requote_min_move_bps, when a fill
+    changed inventory (a filled side is gone and the other may need
+    resizing), when the size target changed (REDUCE rung), or when a side
+    that was wanted never went live (it was refused last time)."""
+    if not resting or "inventory" not in resting:
+        return False
+    if resting["inventory"] != inv.inventory or resting["notional"] != notional:
+        return False
+    if resting["live"] != resting["wanted"]:
+        return False
+    move_bps = max(
+        abs(bid_px - resting["bid"]) / resting["bid"],
+        abs(ask_px - resting["ask"]) / resting["ask"],
+    ) * 10_000
+    return move_bps < limits.requote_min_move_bps
 
 
 def _seconds_to_bar_close(now: float, bar_seconds: float, settle: float = BAR_SETTLE_S) -> float:

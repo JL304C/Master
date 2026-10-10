@@ -92,3 +92,56 @@ def test_a_refused_ask_does_not_orphan_the_bid():
     b.refuse_sells = False
     _quote(b, inv, resting=resting, rest_counter=Limits().rest_ticks)
     assert b.cancels == 1
+
+
+# -- only re-quote when the orders would actually change --------------------
+
+
+def _quote_at(broker, inv, bid, resting=None, notional=20.0):
+    snap = dict(drawdown_pct=0.0, inventory=inv.inventory, mid=100_000.0,
+                daily_loss_usd=0.0, position_age_s=0.0, data_age_s=0.1)
+    return loop._execute_action(
+        alpaca=broker, spec=resolve_symbol("BTC/USD"), action=Action(QUOTE_WIDE, "test"),
+        bid_px=bid, ask_px=bid + 20.0, mid=100_000.0, quote_notional=notional,
+        directional_notional=20.0, snapshot=snap, limits=Limits(), inv=inv,
+        api_error_streak=0, decision_latency_ms=100.0, resting_quotes=resting,
+        rest_counter=Limits().rest_ticks, now=time.time(), expected_px={},
+    )
+
+
+def test_unchanged_price_leaves_the_working_order_alone():
+    b, inv = _Broker(), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0)
+    for _ in range(5):  # rest period after rest period, same price
+        *_, resting, rc = _quote_at(b, inv, 99_990.0, resting=resting)
+        assert rc == 0
+    assert len(b.sent) == 1 and b.cancels == 0
+
+
+def test_tiny_price_change_is_not_worth_a_requote():
+    b, inv = _Broker(), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0)
+    _quote_at(b, inv, 99_995.0, resting=resting)  # 0.5 bps
+    assert len(b.sent) == 1 and b.cancels == 0
+
+
+def test_real_price_move_requotes():
+    b, inv = _Broker(), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0)
+    _quote_at(b, inv, 99_900.0, resting=resting)  # 9 bps
+    assert len(b.sent) == 2 and b.cancels == 1
+
+
+def test_a_fill_requotes_even_at_the_same_price():
+    b, inv = _Broker(held=0.0002), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0)
+    inv.inventory = 0.0002  # the bid filled; reconcile updated inventory
+    _quote_at(b, inv, 99_990.0, resting=resting)
+    assert b.cancels == 1 and ("sell" in [s for s, _ in b.sent])  # now offers to sell it
+
+
+def test_size_change_requotes():
+    b, inv = _Broker(), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0, notional=20.0)
+    _quote_at(b, inv, 99_990.0, resting=resting, notional=10.0)  # REDUCE rung
+    assert b.cancels == 1
