@@ -420,7 +420,7 @@ def run(
 
             # 2. read the book
             try:
-                bids, asks = _read_top_of_book(alpaca, spec)
+                bids, asks, book_ts = _read_top_of_book(alpaca, spec)
                 if bar_seconds:
                     # Only the flow around this close; the gap since the last
                     # bar can hold more trades than one fetch returns.
@@ -468,7 +468,9 @@ def run(
                 else 0.0
             )
 
-            data_ts = now
+            # How fresh the price is comes from the venue's own stamp on the
+            # book, never from when we read it (see _read_top_of_book).
+            data_ts = book_ts
             if bar_seconds:
                 try:
                     price_hist = _minute_bar_history(alpaca, now)
@@ -777,18 +779,34 @@ def run(
             signal.signal(signal.SIGTERM, previous_sigterm_handler)
 
 
+def _venue_ts(raw) -> float:
+    """The venue's own timestamp on a book or quote, as epoch seconds. A
+    missing or unreadable one is 0.0, which the stale-data limit treats as
+    far too old: when in doubt about how fresh a price is, don't trade on it."""
+    try:
+        return _parse_ts(raw) if raw else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _read_top_of_book(
     alpaca, spec: AssetSpec
-) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+) -> tuple[list[tuple[float, float]], list[tuple[float, float]], float]:
     """Crypto: real L2 depth from the order book. Equities: best bid/ask
     from the latest quote only, wrapped in the same (price, size) shape so
     the rest of the loop never has to know the difference. Returns empty
-    lists, never fabricated levels, when nothing is available."""
+    lists, never fabricated levels, when nothing is available.
+
+    The third value is the time the venue last updated the book or quote
+    (its "t" field), not the time we read it. A frozen feed keeps returning
+    the same "t", so the stale-data limit in risk.py can see it and refuse
+    to quote on it. The first published version stamped every read with
+    the local clock, so that limit could never fire."""
     if spec.has_depth:
         book = alpaca.get_orderbook()
         bids = [(float(l["p"]), float(l["s"])) for l in book.get("b", [])]
         asks = [(float(l["p"]), float(l["s"])) for l in book.get("a", [])]
-        return bids, asks
+        return bids, asks, _venue_ts(book.get("t"))
 
     quote = alpaca.get_latest_quote()
     bids = (
@@ -797,7 +815,7 @@ def _read_top_of_book(
     asks = (
         [(float(quote["ap"]), float(quote.get("as", 0.0)))] if quote.get("ap") else []
     )
-    return bids, asks
+    return bids, asks, _venue_ts(quote.get("t"))
 
 
 def _closed_market_record(block: int, now: float, symbol: str) -> dict:
@@ -959,28 +977,48 @@ def _execute_action(
                 rest_counter = 0
                 fill_txt = f"dry: would quote {buy_qty}/{sell_qty} @ {bid_px:,.2f}/{ask_px:,.2f}"
             else:
-                # Note: this account cannot short. A sell quote placed with
-                # no inventory to back it is a real, expected rejection on a
-                # cash account, caught as an AlpacaAPIError below.
+                notes = []
                 try:
                     if resting_quotes:
                         alpaca.cancel_own_orders()
                         # Our resting bid is gone; only filled coin counts now.
                         held_usd = max(alpaca.get_position_qty(), inv.inventory, 0.0) * mid
                         buy_room_usd = limits.max_position_usd - held_usd
-                    sides = [("sell", sell_qty, ask_px)]
+                    sides = []
                     if buy_qty * bid_px <= buy_room_usd:
-                        sides.insert(0, ("buy", buy_qty, bid_px))
+                        sides.append(("buy", buy_qty, bid_px))
                         buy_room_usd -= buy_qty * bid_px
                     else:
-                        fill_txt = f"bid skipped: ${limits.max_position_usd:.0f} position cap"
+                        notes.append(f"bid skipped: ${limits.max_position_usd:.0f} position cap")
+                    ask_qty = sell_qty
+                    if not spec.shorting_allowed:
+                        # Long or flat only: the ask can only offer coin this
+                        # run holds and Alpaca confirms is there. The first
+                        # published version sent a full-size ask while flat,
+                        # Alpaca refused it every time ("insufficient
+                        # balance"), and that refusal orphaned the bid just
+                        # placed, so bids piled up until the position cap.
+                        own = max(inv.inventory, 0.0)
+                        held = max(alpaca.get_position_qty(), 0.0) if own > 0 else 0.0
+                        ask_qty = _floor_qty(min(sell_qty, own, held), spec)
+                    if ask_qty > 0 and ask_qty * ask_px >= spec.min_notional_usd:
+                        sides.append(("sell", ask_qty, ask_px))
+                    else:
+                        notes.append("ask skipped: nothing held to sell")
                     inv.orders_submitted += len(sides)
                     for side_, qty_, px_ in sides:
                         o = alpaca.submit_limit_order(side_, qty_, px_)
                         if expected_px is not None and o.get("client_order_id"):
                             expected_px[o["client_order_id"]] = px_
-                    resting_quotes = {"bid": bid_px, "ask": ask_px}
-                    rest_counter = 0
+                        # Marked resting as soon as one order is live, so a
+                        # failure on the other side can't orphan it: it is
+                        # cancel-replaced on the next cycle like any quote.
+                        resting_quotes = {"bid": bid_px, "ask": ask_px}
+                        rest_counter = 0
+                    if not sides:
+                        resting_quotes = None  # anything resting was cancelled above
+                    if notes:
+                        fill_txt = "; ".join(notes)
                 except MarketClosedError as exc:
                     return (
                         f"{line_action} ({exc})",

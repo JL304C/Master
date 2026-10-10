@@ -25,7 +25,11 @@ class Limits:
     max_inventory_age_s: float = (
         900.0  # 15 minutes holding non-flat inventory: stop adding, close it out
     )
-    max_stale_data_age_s: float = 5.0  # market data older than this is refused
+    # market data older than this is refused. Measured from the venue's own
+    # timestamp on the book. Alpaca's paper crypto book often goes 20-30 s
+    # between updates, so 5 s vetoed most ticks; 30 s still catches a feed
+    # that has stopped updating.
+    max_stale_data_age_s: float = 30.0
     max_api_errors: int = 5  # consecutive broker/API errors before kill
     max_decision_latency_ms: float = (
         2000.0  # Jev slower than this on a block = late, hold
