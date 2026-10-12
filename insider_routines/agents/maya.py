@@ -107,7 +107,13 @@ def build_signals(moves: list[dict]) -> list[Signal]:
 
 
 def _get(params: dict, key: str) -> list | str:
-    data = http_json(API + "?" + "&".join(f"{k}={v}" for k, v in {**params, "chainid": 1, "apikey": key}.items()))
+    url = API + "?" + "&".join(f"{k}={v}" for k, v in {**params, "chainid": 1, "apikey": key}.items())
+    for attempt in range(4):
+        data = http_json(url)
+        # Etherscan reports rate limiting as a normal 200 reply; back off and retry.
+        if "rate limit" not in str(data.get("result")).lower() or attempt == 3:
+            break
+        time.sleep(2 ** attempt)
     if data.get("status") == "1":
         return data["result"]
     if isinstance(data.get("result"), list) or "No transactions found" in str(data.get("message")):

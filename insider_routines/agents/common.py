@@ -257,11 +257,11 @@ def kv_set(key: str, value: str) -> None:
 # ── HTTP ─────────────────────────────────────────────────────────────────────
 
 # Minimum seconds between requests per host. SEC allows 10 req/s; Etherscan's
-# free tier 5 req/s; OpenFIGI without a key 25 req/min.
+# free tier 3 req/s; OpenFIGI without a key 25 req/min.
 _MIN_INTERVAL = {
     "www.sec.gov": 0.12,
     "data.sec.gov": 0.12,
-    "api.etherscan.io": 0.25,
+    "api.etherscan.io": 0.4,
     "api.openfigi.com": 2.5,
 }
 _last_call: dict[str, float] = {}
