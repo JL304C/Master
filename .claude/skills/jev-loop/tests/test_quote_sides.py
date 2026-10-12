@@ -35,6 +35,11 @@ class _Broker:
         return self.held
 
 
+    def get_position_held_and_free(self):
+
+        return self.get_position_qty(), self.get_position_qty()
+
+
 def _quote(broker, inv, resting=None, rest_counter=0):
     snap = dict(drawdown_pct=0.0, inventory=inv.inventory, mid=100_000.0,
                 daily_loss_usd=0.0, position_age_s=0.0, data_age_s=0.1)

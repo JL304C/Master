@@ -38,6 +38,11 @@ class _Broker:
         return self.held
 
 
+    def get_position_held_and_free(self):
+
+        return self.get_position_qty(), self.get_position_qty()
+
+
 def _tick(monkeypatch, broker, leg, inv=None, resting=None):
     from jevloop import risk
 

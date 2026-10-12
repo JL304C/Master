@@ -195,6 +195,11 @@ class FakeAlpaca:
         return self.held
 
 
+    def get_position_held_and_free(self):
+
+        return self.get_position_qty(), self.get_position_qty()
+
+
 def test_fills_are_read_back_not_assumed():
     alp = FakeAlpaca()
     inv = InventoryState()

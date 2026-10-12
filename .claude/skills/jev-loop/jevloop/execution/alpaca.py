@@ -322,6 +322,20 @@ class AlpacaPaperClient:
             raise
         return float(pos.get("qty", 0.0))
 
+    def get_position_held_and_free(self) -> tuple[float, float]:
+        """(held, free): what Alpaca holds for this symbol, and how much of
+        it can be sold right now, which is held minus what open sell orders
+        have set aside. (0.0, 0.0) if nothing is held."""
+        sym = self.symbol.replace("/", "")
+        try:
+            pos = self._request("GET", f"{self.base_url}/v2/positions/{sym}")
+        except AlpacaAPIError as exc:
+            if exc.status_code == 404:
+                return 0.0, 0.0
+            raise
+        held = float(pos.get("qty", 0.0))
+        return held, float(pos.get("qty_available", held))
+
     # -- market data -----------------------------------------------
     def get_orderbook(self) -> dict:
         """Real L2 depth on crypto. Returns {} on equities (has_depth is

@@ -44,6 +44,11 @@ class _Broker:
         return self.held
 
 
+    def get_position_held_and_free(self):
+
+        return self.get_position_qty(), self.get_position_qty()
+
+
 def _snap(**kw):
     base = dict(
         drawdown_pct=0.0, inventory=0.0, mid=100.0, daily_loss_usd=0.0,

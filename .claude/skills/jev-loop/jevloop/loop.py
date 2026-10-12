@@ -182,6 +182,22 @@ def _floor_qty(qty: float, spec: AssetSpec) -> float:
     return math.floor(round(qty * step, 6)) / step
 
 
+def _drop_dust(inv: InventoryState, spec: AssetSpec) -> bool:
+    """A position smaller than the smallest quantity the venue accepts can
+    never be sold, so treat it as flat. Fee rounding leaves exactly this
+    behind after a close (0.000000009 BTC on a 0.00000001 step). The first
+    published version kept it as a live position: it aged past
+    max_inventory_age_s, and every tick after that tried to close it
+    ("no position to close") instead of quoting, for the rest of the run.
+    Returns True when dust was dropped."""
+    if inv.inventory == 0 or _floor_qty(abs(inv.inventory), spec) > 0:
+        return False
+    inv.inventory = 0.0
+    inv.entry_price = 0.0
+    inv.position_opened_at = None
+    return True
+
+
 def _flatten(alpaca, spec: AssetSpec, inv: InventoryState, dry: bool, seen: dict, expected_px: dict, after_iso: str, now: float) -> str:
     """KILL means flatten for real: cancel this run's own resting orders,
     then send a market order that closes the position this run built. It
@@ -505,9 +521,15 @@ def run(
                         fee = sync_fees(inv, alpaca.get_position_qty() - start_held, fill_price)
                         if fee:
                             recon_txt += f", fee ${fee:.4f}"
+                        if _drop_dust(inv, spec):
+                            recon_txt += ", leftover too small to sell, treated as flat"
                 except AlpacaAPIError as exc:
                     api_error_streak += 1
                     print(f"tick {block} | could not read fills back: {exc}")
+
+            # Dust left by any route (not only a fill this tick) is flat, so
+            # the inventory-age limit in risk.py can't veto every tick over it.
+            _drop_dust(inv, spec)
 
             # 3. state snapshot
             snapshot = build_snapshot(
@@ -889,7 +911,7 @@ def _execute_action(
     # version vetoed every order instead, the exit included, so a stuck
     # position froze the loop after 15 minutes.
     aged = (
-        snapshot.get("inventory", 0) != 0
+        _floor_qty(abs(snapshot.get("inventory", 0)), spec) > 0  # dust can't be sold
         and snapshot.get("position_age_s", 0) > limits.max_inventory_age_s
     )
     order_notional_usd = max(quote_notional, directional_notional)
@@ -1008,7 +1030,16 @@ def _execute_action(
                         own = max(inv.inventory, 0.0)
                         held = max(alpaca.get_position_qty(), 0.0) if own > 0 else 0.0
                         ask_qty = _floor_qty(min(sell_qty, own, held), spec)
-                    if ask_qty > 0 and ask_qty * ask_px >= spec.min_notional_usd:
+                    selling_now = (
+                        action.direction_leg == "down"
+                        and not spec.shorting_allowed
+                        and inv.inventory > 0
+                    )
+                    if selling_now:
+                        # The sell leg below closes the whole long at market;
+                        # an ask now would only set coin aside and block it.
+                        notes.append("ask skipped: selling the position instead")
+                    elif ask_qty > 0 and ask_qty * ask_px >= spec.min_notional_usd:
                         sides.append(("sell", ask_qty, ask_px))
                     else:
                         notes.append("ask skipped: nothing held to sell")
@@ -1062,10 +1093,20 @@ def _execute_action(
                 line_action += " (dry)"
             else:
                 try:
-                    held = max(alpaca.get_position_qty(), 0.0)
-                    qty = _floor_qty(min(own, held), spec)
+                    if resting_quotes and "sell" in resting_quotes.get("live", ("sell",)):
+                        # Our own resting ask has part of the coin set aside,
+                        # so a sell of the whole position is refused
+                        # ("insufficient balance"). The first published
+                        # version retried that every tick. Pull our quotes
+                        # first; the sell goes once the coin is free.
+                        alpaca.cancel_own_orders()
+                        resting_quotes, rest_counter = None, 0
+                    held, free = alpaca.get_position_held_and_free()
+                    qty = _floor_qty(min(own, max(held, 0.0)), spec)
                     if qty <= 0:
                         fill_txt = "no position to close"
+                    elif free + 1e-12 < qty:
+                        fill_txt = "waiting for our cancelled sell offer to release the coin"
                     else:
                         inv.orders_submitted += 1
                         o = alpaca.submit_market_order("sell", qty)
@@ -1133,11 +1174,17 @@ def _quotes_still_good(resting: dict, bid_px, ask_px, inv: InventoryState, notio
 
     Re-quote when a price moved at least requote_min_move_bps, when a fill
     changed inventory (a filled side is gone and the other may need
-    resizing), when the size target changed (REDUCE rung), or when a side
+    resizing), when the size target shrank (REDUCE rung), or when a side
     that was wanted never went live (it was refused last time)."""
     if not resting or "inventory" not in resting:
         return False
-    if resting["inventory"] != inv.inventory or resting["notional"] != notional:
+    if resting["inventory"] != inv.inventory:
+        return False
+    # Size: shrink at once (the REDUCE rung asked for more caution), but
+    # don't re-quote just to grow back. The rung flips between RUN and
+    # REDUCE often, and re-quoting both ways cancelled and re-placed the
+    # quotes every few seconds (about 30 sell offers in 13 minutes).
+    if notional < resting["notional"]:
         return False
     if resting["live"] != resting["wanted"]:
         return False

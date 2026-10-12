@@ -54,6 +54,11 @@ class _FakeAlpaca:
         return 0.0
 
 
+    def get_position_held_and_free(self):
+
+        return self.get_position_qty(), self.get_position_qty()
+
+
 def test_bar_mode_waits_for_each_close_and_refreshes_minute_bars(tmp_path, monkeypatch):
     monkeypatch.setattr(loop, "LOG_DIR", tmp_path)
     monkeypatch.setattr(loop, "LOG_FILE", tmp_path / "log.jsonl")
