@@ -345,8 +345,41 @@ def ask_claude_json(
 
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         raise RuntimeError("ANTHROPIC_API_KEY not set. Add it to .env")
-    client = Anthropic()
-    msg = client.beta.messages.create(
+    client = Anthropic(http_client=_http_client())
+    try:
+        msg = _create(client, system, user, schema, model, effort, max_tokens)
+    except Exception as exc:
+        # The SDK's "Connection error." hides the real cause; surface it.
+        root = exc
+        while root.__cause__ is not None:
+            root = root.__cause__
+        if root is exc:
+            raise
+        raise RuntimeError(f"{exc} Cause: {type(root).__name__}: {root}") from exc
+    if msg.stop_reason == "refusal":
+        raise RuntimeError(f"Claude declined the request: {msg.stop_details}")
+    if msg.stop_reason == "max_tokens":
+        raise RuntimeError("Claude's reply was cut off (max_tokens) — no signal this run")
+    text = "".join(b.text for b in msg.content if b.type == "text")
+    return json.loads(text)
+
+
+def _http_client() -> Any:
+    """On Windows, verify TLS with Python's own ssl module + the Windows
+    certificate store. The SDK's default helper (truststore) can hit a
+    RecursionError on Windows with recent Python versions."""
+    if sys.platform != "win32" or os.environ.get("SSL_CERT_FILE"):
+        return None
+    import ssl
+
+    from anthropic import DefaultHttpxClient
+
+    return DefaultHttpxClient(verify=ssl.create_default_context())
+
+
+def _create(client: Any, system: str, user: str, schema: dict[str, Any],
+            model: str | None, effort: str | None, max_tokens: int) -> Any:
+    return client.beta.messages.create(
         model=model or DEFAULT_MODEL,
         max_tokens=max_tokens,
         system=system,
@@ -358,12 +391,6 @@ def ask_claude_json(
         betas=["server-side-fallback-2026-07-01"],
         fallbacks="default",
     )
-    if msg.stop_reason == "refusal":
-        raise RuntimeError(f"Claude declined the request: {msg.stop_details}")
-    if msg.stop_reason == "max_tokens":
-        raise RuntimeError("Claude's reply was cut off (max_tokens) — no signal this run")
-    text = "".join(b.text for b in msg.content if b.type == "text")
-    return json.loads(text)
 
 
 # ── Delivery ─────────────────────────────────────────────────────────────────
