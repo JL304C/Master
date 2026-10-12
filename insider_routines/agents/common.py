@@ -411,7 +411,19 @@ def send_email(subject: str, body: str) -> None:
     msg["To"] = to
     msg.set_content(body)
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
+    # Port 465 (SSL) first; fall back to 587 (STARTTLS), which some
+    # antivirus "mail shields" and ISPs leave alone when they block 465.
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as s:
+            s.login(user, pw)
+            s.send_message(msg)
+        return
+    except smtplib.SMTPAuthenticationError:
+        raise
+    except (smtplib.SMTPServerDisconnected, smtplib.SMTPConnectError, OSError) as exc:
+        log("ross", f"port 465 failed ({exc}); retrying on 587")
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=30) as s:
+        s.starttls()
         s.login(user, pw)
         s.send_message(msg)
 
