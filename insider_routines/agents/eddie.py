@@ -67,14 +67,19 @@ def index_url(d: date) -> str:
 
 
 def parse_form_index(text: str) -> list[str]:
-    """Return the unique archive paths of all Form 4 filings in a form.idx file."""
+    """Return one archive path per Form 4 filing in a form.idx file.
+
+    Each filing is listed under both the company's and the insider's CIK
+    folder; the accession number (the file name) identifies it.
+    """
     paths: list[str] = []
     seen: set[str] = set()
     for line in text.splitlines():
         parts = line.split()
         if len(parts) >= 5 and parts[0] == "4" and parts[-1].endswith(".txt"):
-            if parts[-1] not in seen:
-                seen.add(parts[-1])
+            accession = parts[-1].rsplit("/", 1)[-1]
+            if accession not in seen:
+                seen.add(accession)
                 paths.append(parts[-1])
     return paths
 
