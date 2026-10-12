@@ -103,6 +103,13 @@ class EddieTests(unittest.TestCase):
         self.assertEqual(eddie.parse_form4(form4(title="VP Marketing")), [])
         self.assertEqual(len(eddie.parse_form4(form4(title="", director="1"))), 1)
 
+    def test_same_trade_in_two_filings_counted_once(self):
+        buys = eddie.parse_form4(form4(), "f1") + eddie.parse_form4(form4(), "f2")
+        sigs = eddie.build_signals(buys, "2026-10-09")
+        self.assertIn("$1,500,000", sigs[0].reason)
+        two_trades = eddie.parse_form4(form4(), "f1") + eddie.parse_form4(form4(shares="2000"), "f2")
+        self.assertIn("$1,800,000", eddie.build_signals(two_trades, "2026-10-09")[0].reason)
+
     def test_signal_threshold_and_confidence(self):
         small = eddie.parse_form4(form4(shares="500", price="100"))  # $50k
         self.assertEqual(eddie.build_signals(small, "2026-10-09"), [])

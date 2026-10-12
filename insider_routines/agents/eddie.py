@@ -55,6 +55,7 @@ class Buy:
     top_exec: bool
     value: float
     filing: str
+    trade: tuple = ()  # (date, shares, price) — identifies the same trade across filings
 
 
 def index_url(d: date) -> str:
@@ -126,7 +127,8 @@ def parse_form4(doc: str, filing: str = "") -> list[Buy]:
     if best is None:
         return []
 
-    value = 0.0
+    rank, name, role = best
+    buys = []
     for tx in root.findall("nonDerivativeTable/nonDerivativeTransaction"):
         code = (tx.findtext("transactionCoding/transactionCode") or "").strip()
         acq = (tx.findtext("transactionAmounts/transactionAcquiredDisposedCode/value") or "").strip()
@@ -134,17 +136,27 @@ def parse_form4(doc: str, filing: str = "") -> list[Buy]:
             continue
         shares = _num(tx.findtext("transactionAmounts/transactionShares/value"))
         price = _num(tx.findtext("transactionAmounts/transactionPricePerShare/value"))
-        value += shares * price
-    if value <= 0:
-        return []
-    rank, name, role = best
-    return [Buy(ticker, issuer, name, role, rank == 3, value, filing)]
+        when = (tx.findtext("transactionDate/value") or "").strip()
+        if shares * price > 0:
+            buys.append(Buy(ticker, issuer, name, role, rank == 3, shares * price, filing, (when, shares, price)))
+    return buys
 
 
 def build_signals(buys: list[Buy], day: str) -> list[Signal]:
-    """Group buys by insider, apply the $100k floor, then roll up per ticker."""
+    """Group buys by insider, apply the $100k floor, then roll up per ticker.
+
+    The same trade is often reported in several filings (e.g. a director and
+    the company they control each file one), so identical trades — same
+    insider, date, share count and price — are counted once.
+    """
     per_insider: dict[tuple[str, str], Buy] = {}
+    seen: set[tuple] = set()
     for b in buys:
+        if b.trade:
+            trade_key = (b.ticker, b.insider, b.trade)
+            if trade_key in seen:
+                continue
+            seen.add(trade_key)
         key = (b.ticker, b.insider)
         if key in per_insider:
             per_insider[key].value += b.value
