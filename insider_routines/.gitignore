@@ -1,0 +1,4 @@
+.env
+.state/
+config/portfolio_target.json
+config/portfolio_current.json
