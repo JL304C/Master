@@ -191,12 +191,18 @@ def main() -> int:
         if d.weekday() >= 5 or d.isoformat() <= (last or ""):
             continue
         try:
-            text = http_get(index_url(d), headers=headers).decode("latin-1")
+            # SEC answers 403 (not 404) for an index it hasn't published yet.
+            text = http_get(index_url(d), headers=headers, not_found=(403, 404)).decode("latin-1")
         except HTTPNotFound:
             continue  # not published yet, or a holiday
         todo.append((d, text))
         if not last or len(todo) >= MAX_DAYS_PER_RUN:
             break  # first run: just the latest day
+    if not todo and not last:
+        raise RuntimeError(
+            f"no EDGAR daily index found for the last {LOOKBACK_DAYS} days — SEC may be "
+            "blocking you; check SEC_USER_AGENT in .env and any VPN"
+        )
     if not todo:
         print("[eddie] no new EDGAR daily index since last run")
         log("eddie", "no new daily index")

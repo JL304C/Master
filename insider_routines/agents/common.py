@@ -278,11 +278,13 @@ def http_get(
     data: bytes | None = None,
     timeout: float = 30,
     retries: int = 4,
+    not_found: tuple[int, ...] = (404,),
 ) -> bytes:
     """GET (or POST when `data` is set) with per-host throttling and retries.
 
     Retries 429 / 5xx / network errors with 2s, 4s, 8s, 16s backoff.
-    Raises HTTPNotFound on 404 so callers can treat "not published yet" cleanly.
+    Raises HTTPNotFound on 404 (or any code in `not_found`) so callers can
+    treat "not published yet" cleanly.
     """
     host = urllib.parse.urlparse(url).netloc
     req = urllib.request.Request(url, data=data, headers=headers or {})
@@ -295,7 +297,7 @@ def http_get(
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return resp.read()
         except urllib.error.HTTPError as exc:
-            if exc.code == 404:
+            if exc.code in not_found:
                 raise HTTPNotFound(url) from exc
             if exc.code == 403 and host.endswith("sec.gov"):
                 raise RuntimeError(
