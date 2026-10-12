@@ -51,6 +51,17 @@ FUNDS = [
     ("Two Sigma Investments", "0001179392"),
 ]
 
+# Broad index / sector / bond ETFs. Big funds hold these mostly as hedges,
+# so changes in them say little about conviction. Ignored.
+INDEX_ETFS = {
+    "SPY", "IVV", "VOO", "SPLG", "RSP", "VTI", "ITOT", "QQQ", "QQQM", "IWM",
+    "IWB", "IWF", "IWD", "IWR", "IJH", "IJR", "MDY", "DIA", "VUG", "VTV",
+    "EFA", "IEFA", "VEA", "EEM", "IEMG", "VWO", "ACWI", "VT", "EWJ", "FXI",
+    "AGG", "BND", "TLT", "IEF", "SHY", "LQD", "HYG", "JNK", "TIP", "GOVT",
+    "GLD", "IAU", "SLV", "USO", "SMH", "SOXX", "KRE", "XBI", "GDX",
+    "XLK", "XLF", "XLE", "XLV", "XLY", "XLP", "XLI", "XLU", "XLB", "XLRE", "XLC",
+}
+
 MIN_MOVE_USD = 50_000_000
 INCREASE_PCT = 0.25
 FRESH_DAYS = 14
@@ -144,6 +155,8 @@ def build_signals(moves: list[dict]) -> list[Signal]:
 
     sigs: list[tuple[float, Signal]] = []
     for (ticker, direction), group in groups.items():
+        if ticker in INDEX_ETFS:
+            continue
         group.sort(key=lambda m: m["usd"], reverse=True)
         total = sum(m["usd"] for m in group)
         funds = sorted({m["fund"] for m in group})

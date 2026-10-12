@@ -7,7 +7,7 @@ information; the decision is yours.
 | Agent | Reads | Source | Schedule |
 |-------|-------|--------|----------|
 | **Eddie**  | Insider open-market buys ≥ $100k (CEO/CFO/President/Chair/Director) | SEC EDGAR daily index + Form 4 XML | Daily 06:00 |
-| **Maggie** | New / +25% / exited positions ≥ $50M at Berkshire, Bridgewater, Renaissance, Citadel, Two Sigma | SEC EDGAR 13F-HR filings, OpenFIGI for tickers | Sun 19:00 |
+| **Maggie** | New / +25% / exited positions ≥ $50M at Berkshire, Bridgewater, Renaissance, Citadel, Two Sigma (broad index/sector ETFs ignored — mostly hedges) | SEC EDGAR 13F-HR filings, OpenFIGI for tickers | Sun 19:00 |
 | **Frank**  | Fed speeches, testimony, FOMC statements from the last 7 days, hawkish vs dovish | federalreserve.gov RSS → **Claude** classifies the text | Mon 08:00 |
 | **Maya**   | Whale flows ≥ $5M in/out of exchange wallets (ETH, WETH, WBTC, USDC, USDT) | Etherscan API (free key) | Every 6h |
 | **Janet**  | Your portfolio drifting ≥ 5pp from target | Your two JSON files | Daily 17:00 |
@@ -96,6 +96,20 @@ the computer is awake. launchd and Task Scheduler catch up on a missed run
 after wake-up; cron doesn't.
 
 Logs: `.state/logs/<agent>.log`. Database: `.state/state.db`.
+
+### Windows notes
+
+- Use `python` (not `python3`) and backslashes: `python agents\frank.py --dry-run`.
+- Open PowerShell in the folder: in File Explorer, open `insider_routines`,
+  click the address bar, type `powershell`, press Enter.
+- Edit settings with `notepad .env`. Don't run `copy config\.env.example .env`
+  once `.env` exists — it overwrites your keys without asking.
+- Gmail needs the full address in `GMAIL_USER` and the 16-letter **app
+  password** (not your normal password) in `GMAIL_APP_PASSWORD`.
+- Update the agents to the latest version without git (one line):
+  ```powershell
+  foreach ($f in "common.py","eddie.py","maggie.py","frank.py","maya.py","janet.py","sophie.py","ross.py") { Invoke-WebRequest "https://raw.githubusercontent.com/JL304C/Master/claude/kind-cannon-pmpz24/insider_routines/agents/$f" -OutFile "agents\$f" -UseBasicParsing }
+  ```
 
 ## Tests
 

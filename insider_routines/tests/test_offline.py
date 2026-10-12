@@ -154,6 +154,13 @@ class MaggieTests(unittest.TestCase):
         self.assertEqual(sigs["AAPL"].direction, BULLISH)
         self.assertEqual(sigs["NEWC"].confidence, 2)  # $60M + new-position bonus
 
+    def test_index_etfs_ignored(self):
+        moves = [
+            {"kind": "INCREASED +335%", "usd": 10e9, "ticker": "IVV", "fund": "Citadel", "filed": "2026-08-14"},
+            {"kind": "NEW POSITION", "usd": 60e6, "ticker": "NEWC", "fund": "Citadel", "filed": "2026-08-14"},
+        ]
+        self.assertEqual([s.ticker for s in maggie.build_signals(moves)], ["NEWC"])
+
     def test_norm_name(self):
         self.assertEqual(maggie.norm_name("Apple Inc."), maggie.norm_name("APPLE INC"))
 
