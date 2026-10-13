@@ -65,7 +65,12 @@ class Limits:
     # ...and only cancel-replace if a price would move at least this much
     # (in bps of the old price), or a fill / size change means the orders
     # themselves must change. Otherwise the working orders are left alone.
-    requote_min_move_bps: float = 5.0
+    # At 5 bps the bid chased every gradual drop down and only a sudden
+    # spike could reach it: a $415 slide on 2026-10-13 filled nothing.
+    # 18 bps (~$150 on BTC at $83k) lets a steady move of that size reach
+    # a resting quote. The cost: a quote can be filled just before the
+    # move carries on, which max_position_usd and max_inventory_age_s cap.
+    requote_min_move_bps: float = 18.0
     quote_notional_usd: float = 20.0  # dollar target for each side of a quote
     directional_notional_usd: float = (
         20.0  # dollar target for the directional-leg order

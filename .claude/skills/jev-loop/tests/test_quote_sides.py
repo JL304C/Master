@@ -130,10 +130,21 @@ def test_tiny_price_change_is_not_worth_a_requote():
     assert len(b.sent) == 1 and b.cancels == 0
 
 
+def test_a_gradual_slide_lets_price_reach_the_resting_bid():
+    # 2026-10-13: BTC slid ~$415 in small steps; at a 5 bps threshold the
+    # bid stepped down ahead of it every time and never filled. Steps of
+    # ~9 bps must now leave the bid where it is so the slide can reach it.
+    b, inv = _Broker(), InventoryState()
+    *_, resting, _ = _quote_at(b, inv, 99_990.0)
+    for bid in (99_900.0, 99_830.0):  # 9 bps, then 16 bps below the original
+        *_, resting, _ = _quote_at(b, inv, bid, resting=resting)
+    assert len(b.sent) == 1 and b.cancels == 0
+
+
 def test_real_price_move_requotes():
     b, inv = _Broker(), InventoryState()
     *_, resting, _ = _quote_at(b, inv, 99_990.0)
-    _quote_at(b, inv, 99_900.0, resting=resting)  # 9 bps
+    _quote_at(b, inv, 99_700.0, resting=resting)  # 29 bps
     assert len(b.sent) == 2 and b.cancels == 1
 
 
