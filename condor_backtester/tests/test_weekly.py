@@ -222,3 +222,19 @@ def test_restore_stdlib_ssl_undoes_truststore_injection():
     finally:
         ts.extract_from_ssl()
     assert wk._restore_stdlib_ssl() is None   # nothing to undo
+
+
+def test_legs_without_delta_still_usable_as_wings(settings):
+    """2026-10-14 pre-market: Schwab had no delta for the 727 put, so the plan
+    skipped. L2/L4 only need prices; only L1/L3 need deltas."""
+    rows, now = model_rows()
+    quotes = wk.quotes_from_prices(rows, 777.0, EXP, now, 0.04, 0.013)
+    clean, _ = wk.build_plan(quotes, EXP, TODAY, settings)
+    l2, l4 = clean.strikes[1], clean.strikes[3]
+    no_delta = [wk.PutQuote(q.strike, q.bid, q.ask, math.nan) if q.strike in (l2, l4) else q for q in quotes]
+    plan, why = wk.build_plan(no_delta, EXP, TODAY, settings)
+    assert plan is not None, why
+    assert plan.strikes == clean.strikes and plan.mid_credit == pytest.approx(clean.mid_credit)
+    no_quote = [wk.PutQuote(q.strike, 0.0, 0.0, math.nan) if q.strike == l2 else q for q in quotes]
+    plan, why = wk.build_plan(no_quote, EXP, TODAY, settings)
+    assert plan is None and "market hours" in why

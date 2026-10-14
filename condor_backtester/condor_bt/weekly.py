@@ -133,12 +133,13 @@ def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -
     L3 ~credit_delta, L4 = L3 - credit_width, all must be listed, L3 < L2.
     Bad quotes are not used to pick strikes; if a leg's quote is bad, its
     price is estimated from the neighboring strikes and the plan says so."""
-    usable = [q for q in quotes if q.ask > 0 and q.bid <= q.ask and math.isfinite(q.delta) and q.delta < 0]
-    if not usable:
+    priced = [q for q in quotes if q.ask > 0 and q.bid <= q.ask]
+    if not [q for q in priced if math.isfinite(q.delta) and q.delta < 0]:
         return None, "no usable put quotes (market closed or data source empty?)"
-    bad = find_bad_quotes(usable)
-    by_strike = {q.strike: (bad[q.strike][1] if q.strike in bad else q) for q in usable}
-    good = [q for q in usable if q.strike not in bad]
+    bad = find_bad_quotes(priced)
+    by_strike = {q.strike: (bad[q.strike][1] if q.strike in bad else q) for q in priced}
+    # strikes are picked by delta, so only quotes with a delta qualify as L1/L3
+    good = [q for q in priced if q.strike not in bad and math.isfinite(q.delta) and q.delta < 0]
     q1 = min(good, key=lambda q: abs(q.delta + s["debit_delta"]))
     q3 = min(good, key=lambda q: abs(q.delta + s["credit_delta"]))
     l1, l3 = q1.strike, q3.strike
@@ -147,7 +148,8 @@ def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -
         return None, f"strike overlap: 10-delta strike {l3:g} is not below {l2:g}; skip this week"
     missing = [k for k in (l2, l4) if k not in by_strike]
     if missing:
-        return None, f"strike(s) {missing} not listed; skip this week"
+        return None, (f"no quote for strike(s) {[f'{k:g}' for k in missing]} "
+                      "(not listed, or no bid/ask yet; run during market hours)")
     legs = (q1, by_strike[l2], q3, by_strike[l4])
     signs = (1, -1, -1, 1)   # buy L1, sell L2, sell L3, buy L4
     mid = -sum(sg * q.mid for sg, q in zip(signs, legs))
@@ -351,9 +353,11 @@ def schwab_chain(s: dict, today: date):
         for k, contracts in strikes.items():
             c = contracts[0]
             d = c.get("delta")
-            if d is None or not math.isfinite(d) or d <= -1 or d >= 0:
-                continue
-            by_exp.setdefault(exp, []).append(PutQuote(float(k), float(c["bid"]), float(c["ask"]), float(d)))
+            # Schwab sends -999 / NaN when it has no greek (e.g. before the open);
+            # keep the strike anyway, it can still be a priced L2/L4 leg
+            d = float(d) if d is not None and math.isfinite(d) and -1 < d < 0 else math.nan
+            by_exp.setdefault(exp, []).append(
+                PutQuote(float(k), float(c.get("bid") or 0), float(c.get("ask") or 0), d))
     exps = sorted(by_exp)
     exp = pick_expiration(exps, today, s["target_dte"], s["dte_tolerance"])
     return spot, exps, exp, (by_exp.get(exp, []) if exp else [])
@@ -382,11 +386,27 @@ def open_positions(rows: list[dict], today: date) -> list[dict]:
 
 
 # --------------------------------------------------------------------- commands
+def _market_hours_note() -> str | None:
+    """Warn outside 9:30-16:00 New York time; quotes are missing or stale then."""
+    try:
+        from zoneinfo import ZoneInfo
+        ny = datetime.now(ZoneInfo("America/New_York"))
+    except Exception:          # no tz database (Windows without tzdata): skip the check
+        return None
+    if ny.weekday() >= 5 or not ((9, 30) <= (ny.hour, ny.minute) < (16, 0)):
+        return (f"WARNING: it's {ny:%a %H:%M} in New York and the options market is closed "
+                "(9:30-16:00 ET). Quotes may be missing or stale; run it during market hours.")
+    return None
+
+
 def cmd_plan(a, s):
     today = date.today()
     src = s["source"] if a.source is None else a.source
     if src == "auto":
         src = "schwab" if schwab_configured() else "yahoo"
+    hours = _market_hours_note()
+    if hours:
+        print(hours + "\n")
     if today.weekday() != 4:
         print(f"Note: today is {today:%A}; the strategy enters on Fridays "
               "(or the prior trading day if Friday is a holiday).\n")
