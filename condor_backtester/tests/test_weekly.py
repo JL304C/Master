@@ -209,3 +209,16 @@ def test_schwab_chain_parsing(monkeypatch, tmp_path):
     assert calls[-1][1] == "$XSP" and calls[-1][2]["contract_type"] == "PUT"
     plan, why = wk.build_plan(got, EXP, date(2026, 10, 9), wk.DEFAULTS)
     assert plan is not None, why
+
+
+def test_restore_stdlib_ssl_undoes_truststore_injection():
+    import ssl
+    ts = pytest.importorskip("pip._vendor.truststore")
+    ts.inject_into_ssl()
+    try:
+        assert "truststore" in ssl.SSLContext.__module__
+        assert wk._restore_stdlib_ssl() == "pip._vendor.truststore"
+        assert ssl.SSLContext.__module__ == "ssl"
+    finally:
+        ts.extract_from_ssl()
+    assert wk._restore_stdlib_ssl() is None   # nothing to undo

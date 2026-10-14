@@ -260,10 +260,29 @@ def _schwab_token_age_days(path: str) -> float | None:
         return None
 
 
+def _restore_stdlib_ssl() -> str | None:
+    """Undo a global ``truststore`` injection (e.g. from the pip-system-certs
+    package). It replaces ssl.SSLContext process-wide, which broke both the
+    automatic login's local server and the token request on the user's PC.
+    Returns the name of the module that was undone, if any."""
+    import importlib
+    import ssl
+    owner = getattr(ssl.SSLContext, "__module__", "")
+    if "truststore" not in owner:
+        return None
+    pkg = owner.rsplit("._api", 1)[0]          # pip._vendor.truststore or truststore
+    try:
+        importlib.import_module(pkg).extract_from_ssl()
+    except Exception:
+        return None
+    return pkg if "truststore" not in getattr(ssl.SSLContext, "__module__", "") else None
+
+
 def schwab_client():
     """Saved token if it's fresh; otherwise the copy-paste login, which needs
     no local web server (the automatic browser login fails on some Windows
     Python installs with a certificate error)."""
+    _restore_stdlib_ssl()
     try:
         import schwab
     except ImportError:
@@ -281,6 +300,28 @@ def schwab_client():
           "Your browser will then show an error page at 127.0.0.1. That's expected:\n"
           "copy the WHOLE address from the address bar and paste it here.")
     return schwab.auth.client_from_manual_flow(key, secret, callback, token)
+
+
+def cmd_diagnose(a, s):
+    import platform
+    import ssl
+    print("python", platform.python_version(), platform.system())
+    print("ssl.SSLContext before:", ssl.SSLContext.__module__)
+    undone = _restore_stdlib_ssl()
+    print("undid truststore injection from:", undone)
+    print("ssl.SSLContext after: ", ssl.SSLContext.__module__)
+    for mod in ("schwab", "authlib", "httpx", "truststore", "pip_system_certs", "yfinance"):
+        try:
+            m = __import__(mod)
+            print(f"{mod:<17} {getattr(m, '__version__', 'installed')}")
+        except Exception as exc:
+            print(f"{mod:<17} not available ({type(exc).__name__})")
+    print("SCHWAB_API_KEY set:", bool(os.environ.get("SCHWAB_API_KEY")),
+          "  SCHWAB_APP_SECRET set:", bool(os.environ.get("SCHWAB_APP_SECRET")))
+    tok = os.environ.get("SCHWAB_TOKEN_PATH", os.path.join("journal", "schwab_token.json"))
+    print("token file:", tok, "exists" if os.path.exists(tok) else "missing",
+          f"(age {_schwab_token_age_days(tok):.1f} days)" if _schwab_token_age_days(tok) is not None else "")
+    return 0
 
 
 def schwab_login(a, s):
@@ -469,9 +510,11 @@ def main(argv=None):
     r.add_argument("--note")
     sub.add_parser("status", help="open positions, total risk, fills vs mid")
     sub.add_parser("login", help="(re)do the Schwab API login")
+    sub.add_parser("diagnose", help="print environment details for troubleshooting")
     a = ap.parse_args(argv)
     s = load_settings(a.settings)
-    return {"plan": cmd_plan, "record": cmd_record, "status": cmd_status, "login": schwab_login}[a.cmd](a, s)
+    return {"plan": cmd_plan, "record": cmd_record, "status": cmd_status, "login": schwab_login,
+            "diagnose": cmd_diagnose}[a.cmd](a, s)
 
 
 if __name__ == "__main__":
