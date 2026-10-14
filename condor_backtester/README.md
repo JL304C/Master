@@ -103,7 +103,7 @@ python -m condor_bt.weekly record 2026-12-31 732/729/690/680 0.15 --mid 0.14   #
 python -m condor_bt.weekly status      # open positions, total risk, your fills vs mid
 ```
 
-- Settings are in `configs/weekly_xsp.yaml`: deltas, widths (3 and 10 XSP
+- Settings are in `configs/weekly_xsp.yaml`: deltas, widths (5 and 20 XSP
   points), `min_credit`, position and risk limits, and Schwab's $0.66 per-leg fee.
 - `plan` skips the week, and says why, if no expiration is within 90 +/- 7
   days, the strikes overlap, the mid credit is below `min_credit`, or the

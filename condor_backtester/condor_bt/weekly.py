@@ -9,7 +9,7 @@ order to enter in thinkorswim, plus a short limit-price ladder.
     python -m condor_bt.weekly status               # open positions, total risk, fills vs mid
 
 All prices here are native XSP (what thinkorswim shows): 0.15 = $15 per
-contract. Widths are in XSP points (3 and 10 = 30 and 100 SPX points).
+contract. Widths are in XSP points (5 and 20 = 50 and 200 SPX points; set in configs/weekly_xsp.yaml).
 
 Chain sources (``--source``):
     yahoo   free, no setup (pip install yfinance). Quotes may be ~15 min delayed.
