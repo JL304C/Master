@@ -59,6 +59,7 @@ def test_ticket_and_ladder(settings):
     t = wk.tos_ticket(plan, settings, 0.14)
     assert t.startswith("BUY +1 CONDOR XSP 100 31 DEC 26 ") and t.endswith("PUT @-.14 LMT")
     assert wk.limit_ladder(0.144, 0.10, 3) == [0.14, 0.13, 0.12, 0.11]
+    assert wk.limit_ladder(0.385, 0.20, 3) == [0.38, 0.37, 0.36, 0.35]   # 2026-10-14: started at 0.39 before
     assert wk.limit_ladder(0.12, 0.10, 5) == [0.12, 0.11, 0.10]
 
 

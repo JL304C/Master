@@ -198,7 +198,7 @@ def money(plan_credit: float, s: dict) -> dict:
 
 
 def limit_ladder(mid: float, floor: float, steps: int) -> list[float]:
-    start = round(mid + 1e-9, 2)
+    start = math.floor(mid * 100 + 1e-6) / 100   # first limit is the mid, cut to a whole cent
     out = []
     for i in range(steps + 1):
         p = round(start - 0.01 * i, 2)
@@ -475,7 +475,7 @@ def cmd_plan(a, s):
     print("  Leg                  Strike    Delta    Bid    Ask    Mid")
     for name, q in zip(names, plan.quotes):
         print(f"  {name:<20} {q.strike:>6g}  {q.delta:>7.3f}  {q.bid:>5.2f}  {q.ask:>5.2f}  {q.mid:>5.2f}")
-    print(f"\n  Credit at mid {plan.mid_credit:.2f}   (worst fill {plan.natural_credit:.2f}, "
+    print(f"\n  Credit at mid {plan.mid_credit:.3f}   (worst fill {plan.natural_credit:.2f}, "
           f"best fill {plan.best_credit:.2f}; negative = debit)")
     print(f"  Short strike {100 * (1 - plan.strikes[2] / spot):.1f}% below {s['symbol']}")
     for k, q in (plan.suspects or {}).items():
@@ -503,7 +503,7 @@ def cmd_plan(a, s):
     print(f"  {tos_ticket(plan, s, ladder[0])}")
     print("  Start at " + ", then ".join(f"{p:.2f}" for p in ladder)
           + " credit, a few minutes each. Don't go below "
-          f"{ladder[-1]:.2f}. If thinkorswim's mid differs from {plan.mid_credit:.2f}, start at its mid.")
+          f"{ladder[-1]:.2f}. If thinkorswim's mid differs from {plan.mid_credit:.3f}, start at its mid.")
     l1, l2, l3, l4 = (f"{k:g}" for k in plan.strikes)
     print("\nAfter it fills, record it (replace FILL with your fill price):")
     print(f"  python -m condor_bt.weekly record {plan.expiration} {l1}/{l2}/{l3}/{l4} FILL --mid {plan.mid_credit:.2f}")
