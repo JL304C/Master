@@ -246,16 +246,57 @@ def schwab_configured() -> bool:
     return all(os.environ.get(k) for k in ("SCHWAB_API_KEY", "SCHWAB_APP_SECRET"))
 
 
-def schwab_chain(s: dict, today: date):
+SCHWAB_LOGIN_MAX_AGE_DAYS = 6.5   # Schwab refresh tokens expire after 7 days
+
+
+def _schwab_token_age_days(path: str) -> float | None:
+    import json
+    import time
+    try:
+        with open(path) as fh:
+            created = json.load(fh).get("creation_timestamp")
+        return None if created is None else (time.time() - float(created)) / 86400.0
+    except (OSError, ValueError):
+        return None
+
+
+def schwab_client():
+    """Saved token if it's fresh; otherwise the copy-paste login, which needs
+    no local web server (the automatic browser login fails on some Windows
+    Python installs with a certificate error)."""
     try:
         import schwab
     except ImportError:
         sys.exit("schwab-py is not installed: pip install schwab-py")
+    key, secret = os.environ["SCHWAB_API_KEY"], os.environ["SCHWAB_APP_SECRET"]
+    callback = os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182")
+    token = os.environ.get("SCHWAB_TOKEN_PATH", os.path.join("journal", "schwab_token.json"))
+    os.makedirs(os.path.dirname(token) or ".", exist_ok=True)
+    age = _schwab_token_age_days(token)
+    if age is not None and age < SCHWAB_LOGIN_MAX_AGE_DAYS:
+        return schwab.auth.client_from_token_file(token, key, secret)
+    if age is not None:
+        print(f"Schwab login is {age:.1f} days old; Schwab requires a new login every 7 days.")
+    print("Schwab login: open the link below, sign in with your brokerage login, approve access.\n"
+          "Your browser will then show an error page at 127.0.0.1. That's expected:\n"
+          "copy the WHOLE address from the address bar and paste it here.")
+    return schwab.auth.client_from_manual_flow(key, secret, callback, token)
+
+
+def schwab_login(a, s):
+    if not schwab_configured():
+        sys.exit("set SCHWAB_API_KEY and SCHWAB_APP_SECRET first (see README)")
+    token = os.environ.get("SCHWAB_TOKEN_PATH", os.path.join("journal", "schwab_token.json"))
+    if os.path.exists(token):
+        os.remove(token)   # force a fresh login
+    schwab_client()
+    print(f"logged in; token saved to {token}")
+    return 0
+
+
+def schwab_chain(s: dict, today: date):
     from datetime import timedelta
-    client = schwab.auth.easy_client(
-        os.environ["SCHWAB_API_KEY"], os.environ["SCHWAB_APP_SECRET"],
-        os.environ.get("SCHWAB_CALLBACK_URL", "https://127.0.0.1:8182"),
-        os.environ.get("SCHWAB_TOKEN_PATH", os.path.join("journal", "schwab_token.json")))
+    client = schwab_client()
     lo = today + timedelta(days=s["target_dte"] - s["dte_tolerance"])
     hi = today + timedelta(days=s["target_dte"] + s["dte_tolerance"])
     resp = client.get_option_chain("$" + s["symbol"], contract_type=client.Options.ContractType.PUT,
@@ -427,9 +468,10 @@ def main(argv=None):
     r.add_argument("--date", help="entry date if not today, YYYY-MM-DD")
     r.add_argument("--note")
     sub.add_parser("status", help="open positions, total risk, fills vs mid")
+    sub.add_parser("login", help="(re)do the Schwab API login")
     a = ap.parse_args(argv)
     s = load_settings(a.settings)
-    return {"plan": cmd_plan, "record": cmd_record, "status": cmd_status}[a.cmd](a, s)
+    return {"plan": cmd_plan, "record": cmd_record, "status": cmd_status, "login": schwab_login}[a.cmd](a, s)
 
 
 if __name__ == "__main__":

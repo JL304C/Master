@@ -145,3 +145,67 @@ def test_bad_quote_not_used_to_pick_strikes(settings):
     bad = [wk.PutQuote(q.strike, 9.0, 9.1, -0.100) if q.strike == 640 else q for q in quotes]
     plan, _ = wk.build_plan(bad, EXP, TODAY, settings)
     assert plan.strikes == clean.strikes
+
+
+def _fake_schwab(monkeypatch, calls, chain_json=None):
+    class FakeResp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return chain_json
+
+    class FakeClient:
+        class Options:
+            class ContractType:
+                PUT = "PUT"
+
+        def get_option_chain(self, symbol, **kw):
+            calls.append(("chain", symbol, kw))
+            return FakeResp()
+
+    auth = types.SimpleNamespace(
+        client_from_token_file=lambda *a: calls.append(("token_file",)) or FakeClient(),
+        client_from_manual_flow=lambda *a: calls.append(("manual",)) or FakeClient(),
+        easy_client=lambda *a, **k: (_ for _ in ()).throw(AssertionError("easy_client must not be used")))
+    monkeypatch.setitem(sys.modules, "schwab", types.SimpleNamespace(auth=auth))
+    monkeypatch.setenv("SCHWAB_API_KEY", "k")
+    monkeypatch.setenv("SCHWAB_APP_SECRET", "s")
+
+
+def test_schwab_login_uses_manual_flow_then_saved_token(monkeypatch, tmp_path):
+    import json
+    import time
+    token = tmp_path / "tok.json"
+    monkeypatch.setenv("SCHWAB_TOKEN_PATH", str(token))
+    calls = []
+    _fake_schwab(monkeypatch, calls)
+    wk.schwab_client()
+    assert calls[-1] == ("manual",)                        # no token yet: copy-paste login
+    token.write_text(json.dumps({"creation_timestamp": int(time.time()) - 3600, "token": {}}))
+    wk.schwab_client()
+    assert calls[-1] == ("token_file",)                    # fresh token: reused
+    token.write_text(json.dumps({"creation_timestamp": int(time.time()) - 7 * 86400, "token": {}}))
+    wk.schwab_client()
+    assert calls[-1] == ("manual",)                        # 7 days old: log in again
+
+
+def test_schwab_chain_parsing(monkeypatch, tmp_path):
+    import json
+    import time
+    token = tmp_path / "tok.json"
+    token.write_text(json.dumps({"creation_timestamp": int(time.time()), "token": {}}))
+    monkeypatch.setenv("SCHWAB_TOKEN_PATH", str(token))
+    rows, now = model_rows()
+    quotes = wk.quotes_from_prices(rows, 777.0, EXP, now, 0.04, 0.013)
+    chain = {"underlyingPrice": 777.0, "putExpDateMap": {
+        f"{EXP}:83": {f"{q.strike:.1f}": [{"bid": q.bid, "ask": q.ask, "delta": round(q.delta, 3)}]
+                      for q in quotes},
+        "2026-12-24:76": {"700.0": [{"bid": 1.0, "ask": 1.1, "delta": -999.0}]}}}
+    calls = []
+    _fake_schwab(monkeypatch, calls, chain)
+    spot, exps, exp, got = wk.schwab_chain(dict(wk.DEFAULTS), date(2026, 10, 9))
+    assert spot == 777.0 and exp == EXP and len(got) == len(quotes)
+    assert calls[-1][1] == "$XSP" and calls[-1][2]["contract_type"] == "PUT"
+    plan, why = wk.build_plan(got, EXP, date(2026, 10, 9), wk.DEFAULTS)
+    assert plan is not None, why

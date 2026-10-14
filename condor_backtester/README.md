@@ -124,8 +124,12 @@ python -m condor_bt.weekly status      # open positions, total risk, your fills 
    setx SCHWAB_API_KEY "your-app-key"
    setx SCHWAB_APP_SECRET "your-app-secret"
    ```
-3. Open a new PowerShell and run `python -m condor_bt.weekly plan --source schwab`.
-   The first run opens a browser to log in; the token is saved in `journal\`.
+3. Open a new PowerShell and run `python -m condor_bt.weekly login`. It prints
+   a Schwab link: open it, sign in with your brokerage login and approve access.
+   The browser then lands on an error page at `https://127.0.0.1:8182/?code=...`.
+   That's expected: copy the whole address from the address bar and paste it
+   into PowerShell. The token is saved in `journal\`. Schwab requires a new
+   login every 7 days; `plan` asks for it automatically when it's due.
    After that, `source: auto` uses Schwab automatically.
 
 ## Option prices: model vs. real chains
