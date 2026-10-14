@@ -160,6 +160,9 @@ def _fake_schwab(monkeypatch, calls, chain_json=None):
             class ContractType:
                 PUT = "PUT"
 
+            class StrikeRange:
+                ALL = "ALL"
+
         def get_option_chain(self, symbol, **kw):
             calls.append(("chain", symbol, kw))
             return FakeResp()
@@ -238,3 +241,26 @@ def test_legs_without_delta_still_usable_as_wings(settings):
     no_quote = [wk.PutQuote(q.strike, 0.0, 0.0, math.nan) if q.strike == l2 else q for q in quotes]
     plan, why = wk.build_plan(no_quote, EXP, TODAY, settings)
     assert plan is None and "market hours" in why
+
+
+def test_truncated_chain_is_rejected_not_misread(settings):
+    """If the chain only has strikes near the market, the closest-to-0.10-delta
+    strike is really ~0.25 delta; the plan must skip, not trade it."""
+    rows, now = model_rows()
+    quotes = wk.quotes_from_prices(rows, 777.0, EXP, now, 0.04, 0.013)
+    near = [q for q in quotes if q.strike >= 730]
+    plan, why = wk.build_plan(near, EXP, TODAY, settings)
+    assert plan is None and "L3" in why and "chain:" in why
+
+
+def test_schwab_requests_all_strikes(monkeypatch, tmp_path):
+    import json
+    import time
+    token = tmp_path / "tok.json"
+    token.write_text(json.dumps({"creation_timestamp": int(time.time()), "token": {}}))
+    monkeypatch.setenv("SCHWAB_TOKEN_PATH", str(token))
+    calls = []
+    _fake_schwab(monkeypatch, calls, {"underlyingPrice": 777.0, "putExpDateMap": {}})
+    wk.schwab_chain(dict(wk.DEFAULTS), date(2026, 10, 9))
+    kw = calls[-1][2]
+    assert kw["strike_count"] >= 300 and kw["strike_range"] == "ALL"

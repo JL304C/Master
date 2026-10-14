@@ -128,6 +128,21 @@ def find_bad_quotes(quotes: list[PutQuote], abs_tol: float = 0.08, rel_tol: floa
     return bad
 
 
+DELTA_TOLERANCE = 0.03   # L1/L3 must be within this of the target delta
+
+
+def chain_summary(quotes: list[PutQuote]) -> str:
+    if not quotes:
+        return "chain: empty"
+    ks = sorted(q.strike for q in quotes)
+    priced = sum(1 for q in quotes if q.ask > 0)
+    with_delta = [q for q in quotes if math.isfinite(q.delta)]
+    dr = (f", deltas {max(q.delta for q in with_delta):.3f} to {min(q.delta for q in with_delta):.3f}"
+          if with_delta else "")
+    return (f"chain: {len(ks)} strikes {ks[0]:g}-{ks[-1]:g}, {priced} with bid/ask, "
+            f"{len(with_delta)} with delta{dr}")
+
+
 def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -> tuple[Plan | None, str]:
     """Same rules as the backtest: L1 ~debit_delta, L2 = L1 - debit_width,
     L3 ~credit_delta, L4 = L3 - credit_width, all must be listed, L3 < L2.
@@ -142,6 +157,10 @@ def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -
     good = [q for q in priced if q.strike not in bad and math.isfinite(q.delta) and q.delta < 0]
     q1 = min(good, key=lambda q: abs(q.delta + s["debit_delta"]))
     q3 = min(good, key=lambda q: abs(q.delta + s["credit_delta"]))
+    for q, target, name in ((q1, s["debit_delta"], "L1"), (q3, s["credit_delta"], "L3")):
+        if abs(q.delta + target) > DELTA_TOLERANCE:
+            return None, (f"no strike near {target:.2f} delta for {name}: closest is {q.strike:g} at "
+                          f"{q.delta:.3f} (incomplete chain? {chain_summary(quotes)})")
     l1, l3 = q1.strike, q3.strike
     l2, l4 = l1 - s["debit_width"], l3 - s["credit_width"]
     if l3 >= l2:
@@ -149,7 +168,7 @@ def build_plan(quotes: list[PutQuote], expiration: date, today: date, s: dict) -
     missing = [k for k in (l2, l4) if k not in by_strike]
     if missing:
         return None, (f"no quote for strike(s) {[f'{k:g}' for k in missing]} "
-                      "(not listed, or no bid/ask yet; run during market hours)")
+                      f"(not listed, or no bid/ask yet; run during market hours). {chain_summary(quotes)}")
     legs = (q1, by_strike[l2], q3, by_strike[l4])
     signs = (1, -1, -1, 1)   # buy L1, sell L2, sell L3, buy L4
     mid = -sum(sg * q.mid for sg, q in zip(signs, legs))
@@ -342,7 +361,10 @@ def schwab_chain(s: dict, today: date):
     client = schwab_client()
     lo = today + timedelta(days=s["target_dte"] - s["dte_tolerance"])
     hi = today + timedelta(days=s["target_dte"] + s["dte_tolerance"])
+    # ask for every strike: without strike_count/range Schwab may return only a
+    # band of strikes near the market, which misses the ~10-delta wing
     resp = client.get_option_chain("$" + s["symbol"], contract_type=client.Options.ContractType.PUT,
+                                   strike_count=500, strike_range=client.Options.StrikeRange.ALL,
                                    from_date=lo, to_date=hi, include_underlying_quote=True)
     resp.raise_for_status()
     data = resp.json()
@@ -426,6 +448,7 @@ def cmd_plan(a, s):
         return 1
     plan, why = build_plan(quotes, exp, today, s)
     if plan is None:
+        print(f"Expiration: {exp:%a %b %d, %Y} ({(exp - today).days} DTE)")
         print(f"SKIP: {why}")
         return 1
 
