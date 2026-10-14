@@ -88,7 +88,7 @@ def test_record_and_status(settings, capsys):
 def test_plan_command_end_to_end(settings, monkeypatch, capsys):
     rows, now = model_rows()
     quotes = wk.quotes_from_prices(rows, 777.0, EXP, now, 0.04, 0.013)
-    monkeypatch.setattr(wk, "yahoo_chain", lambda s, today: (777.0, [EXP], EXP, quotes))
+    monkeypatch.setattr(wk, "yahoo_chain", lambda s, today: (777.0, [EXP], {EXP: quotes}))
     a = types.SimpleNamespace(source="yahoo")
     rc = wk.cmd_plan(a, settings)
     out = capsys.readouterr().out
@@ -116,8 +116,9 @@ def test_yahoo_falls_back_to_spx_scaled(settings, monkeypatch):
             return types.SimpleNamespace(puts=df)
 
     monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=FakeTicker))
-    spot, exps, exp, quotes = wk.yahoo_chain(settings, EXP - timedelta(days=88))
-    assert spot == pytest.approx(777.0) and exp == EXP
+    spot, exps, chains = wk.yahoo_chain(settings, EXP - timedelta(days=88))
+    assert spot == pytest.approx(777.0) and list(chains) == [EXP]
+    quotes = chains[EXP]
     assert all(q.strike == int(q.strike) for q in quotes)   # 7775 (-> 777.5) dropped
     assert max(q.strike for q in quotes) < 800
 
@@ -207,8 +208,9 @@ def test_schwab_chain_parsing(monkeypatch, tmp_path):
         "2026-12-24:76": {"700.0": [{"bid": 1.0, "ask": 1.1, "delta": -999.0}]}}}
     calls = []
     _fake_schwab(monkeypatch, calls, chain)
-    spot, exps, exp, got = wk.schwab_chain(dict(wk.DEFAULTS), date(2026, 10, 9))
-    assert spot == 777.0 and exp == EXP and len(got) == len(quotes)
+    spot, exps, chains = wk.schwab_chain(dict(wk.DEFAULTS), date(2026, 10, 9))
+    assert spot == 777.0 and list(chains) == [EXP] and len(chains[EXP]) == len(quotes)
+    exp, got = EXP, chains[EXP]
     assert calls[-1][1] == "$XSP" and calls[-1][2]["contract_type"] == "PUT"
     plan, why = wk.build_plan(got, EXP, date(2026, 10, 9), wk.DEFAULTS)
     assert plan is not None, why
@@ -264,3 +266,21 @@ def test_schwab_requests_all_strikes(monkeypatch, tmp_path):
     wk.schwab_chain(dict(wk.DEFAULTS), date(2026, 10, 9))
     kw = calls[-1][2]
     assert kw["strike_count"] >= 300 and kw["strike_range"] == "ALL"
+
+
+def test_falls_back_to_next_expiration_when_strikes_dont_fit(settings, monkeypatch, capsys):
+    """2026-10-14: Jan 15 (93 DTE, monthly) lists XSP strikes $5 apart, so
+    L1 - 3 doesn't exist; the Jan 8 weekly (86 DTE, $1 strikes) does fit."""
+    today = date(2026, 10, 14)
+    monthly, weekly = date(2027, 1, 15), date(2027, 1, 8)
+    rows_m, now = model_rows(exp=monthly, now=datetime(2026, 10, 14, 14, 0))
+    rows_w, _ = model_rows(exp=weekly, now=datetime(2026, 10, 14, 14, 0))
+    q_m = [q for q in wk.quotes_from_prices(rows_m, 777.0, monthly, now, 0.04, 0.013) if q.strike % 5 == 0]
+    q_w = wk.quotes_from_prices(rows_w, 777.0, weekly, now, 0.04, 0.013)
+    assert wk.candidate_expirations([weekly, monthly], today, 90, 7) == [monthly, weekly]
+    monkeypatch.setattr(wk, "date", type("D", (date,), {"today": staticmethod(lambda: today)}))
+    monkeypatch.setattr(wk, "yahoo_chain", lambda s, t: (777.0, [weekly, monthly], {monthly: q_m, weekly: q_w}))
+    rc = wk.cmd_plan(types.SimpleNamespace(source="yahoo"), settings)
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert "Passed over Fri Jan 15, 2027" in out and "Expiration: Fri Jan 08, 2027" in out

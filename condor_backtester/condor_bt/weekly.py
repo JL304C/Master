@@ -93,9 +93,15 @@ def load_settings(path: str | None) -> dict:
 
 
 # --------------------------------------------------------------------- selection
-def pick_expiration(expirations: list[date], today: date, target: int, tol: int) -> date | None:
+def candidate_expirations(expirations: list[date], today: date, target: int, tol: int) -> list[date]:
+    """Expirations within target +/- tol DTE, closest to target first."""
     ok = [e for e in expirations if abs((e - today).days - target) <= tol]
-    return min(ok, key=lambda e: (abs((e - today).days - target), e)) if ok else None
+    return sorted(ok, key=lambda e: (abs((e - today).days - target), e))
+
+
+def pick_expiration(expirations: list[date], today: date, target: int, tol: int) -> date | None:
+    c = candidate_expirations(expirations, today, target, tol)
+    return c[0] if c else None
 
 
 def _line(x0, y0, x1, y1, x):
@@ -248,19 +254,19 @@ def yahoo_chain(s: dict, today: date):
     if not exps:
         sys.exit(f"Yahoo returned no option expirations for ^{s['symbol']}. "
                  "Try --source schwab, or run during market hours.")
-    exp = pick_expiration(exps, today, s["target_dte"], s["dte_tolerance"])
     hist = tk.history(period="5d")
     if hist.empty:
         sys.exit("Yahoo returned no index price")
     spot = float(hist["Close"].iloc[-1]) * scale
-    if exp is None:
-        return spot, exps, None, []
-    puts = tk.option_chain(exp.isoformat()).puts
-    rows = [(k * scale, b * scale, a_ * scale)
-            for k, b, a_ in zip(puts["strike"].astype(float), puts["bid"].astype(float), puts["ask"].astype(float))
-            if scale == 1.0 or abs(k * scale - round(k * scale)) < 1e-9]
-    quotes = quotes_from_prices(rows, spot, exp, datetime.now(), s["risk_free_rate"], s["div_yield"])
-    return spot, exps, exp, quotes
+    chains = {}
+    for exp in candidate_expirations(exps, today, s["target_dte"], s["dte_tolerance"]):
+        puts = tk.option_chain(exp.isoformat()).puts
+        rows = [(k * scale, b * scale, a_ * scale)
+                for k, b, a_ in zip(puts["strike"].astype(float), puts["bid"].astype(float),
+                                    puts["ask"].astype(float))
+                if scale == 1.0 or abs(k * scale - round(k * scale)) < 1e-9]
+        chains[exp] = quotes_from_prices(rows, spot, exp, datetime.now(), s["risk_free_rate"], s["div_yield"])
+    return spot, exps, chains
 
 
 def schwab_configured() -> bool:
@@ -381,8 +387,8 @@ def schwab_chain(s: dict, today: date):
             by_exp.setdefault(exp, []).append(
                 PutQuote(float(k), float(c.get("bid") or 0), float(c.get("ask") or 0), d))
     exps = sorted(by_exp)
-    exp = pick_expiration(exps, today, s["target_dte"], s["dte_tolerance"])
-    return spot, exps, exp, (by_exp.get(exp, []) if exp else [])
+    cands = candidate_expirations(exps, today, s["target_dte"], s["dte_tolerance"])
+    return spot, exps, {e: by_exp[e] for e in cands}
 
 
 # --------------------------------------------------------------------- journal
@@ -439,18 +445,29 @@ def cmd_plan(a, s):
     if any(date.fromisoformat(r["entry_date"]).isocalendar()[:2] == today.isocalendar()[:2] for r in rows):
         print("Note: you already recorded an entry this week.\n")
 
-    spot, exps, exp, quotes = (schwab_chain if src == "schwab" else yahoo_chain)(s, today)
+    spot, exps, chains = (schwab_chain if src == "schwab" else yahoo_chain)(s, today)
     print(f"{s['symbol']} {spot:.2f}   source: {src}   {datetime.now():%Y-%m-%d %H:%M}")
-    if exp is None:
+    if not chains:
         near = sorted(exps, key=lambda e: abs((e - today).days - s["target_dte"]))[:3]
         print(f"SKIP: no expiration within {s['target_dte']} +/- {s['dte_tolerance']} DTE "
               f"(closest: {', '.join(f'{e} ({(e - today).days}d)' for e in near)})")
         return 1
-    plan, why = build_plan(quotes, exp, today, s)
+    # closest-to-target expiration first; fall back to the next one when the
+    # strikes don't fit (e.g. monthly XSP lists $5 strikes far out, weeklies $1)
+    plan, skipped = None, []
+    for exp, quotes in chains.items():
+        plan, why = build_plan(quotes, exp, today, s)
+        if plan is not None:
+            break
+        skipped.append((exp, why))
+    for exp, why in skipped:
+        print(f"{'SKIP' if plan is None else 'Passed over'} {exp:%a %b %d, %Y} "
+              f"({(exp - today).days} DTE): {why}")
     if plan is None:
-        print(f"Expiration: {exp:%a %b %d, %Y} ({(exp - today).days} DTE)")
-        print(f"SKIP: {why}")
+        print("SKIP: no expiration in the window fits the strategy this week")
         return 1
+    if skipped:
+        print()
 
     print(f"Expiration: {plan.expiration:%a %b %d, %Y} ({plan.dte} DTE)\n")
     names = ("BUY  1  (~20-delta)", "SELL 1  (L1 - %g)" % s["debit_width"],
