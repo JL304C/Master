@@ -1,0 +1,118 @@
+# Snapback Entry backtest: Variant A (Asian-session opening box).
+# Every rule from the spec is a parameter. The values under `strategy` are the
+# confirmed rules from the video; `sensitivity` and `grid` hold the comparisons.
+
+data:
+  dataset: GLBX.MDP3
+  schema: ohlcv-1m            # 1-minute bars, resampled to 5-minute and 1-hour locally
+  stype_in: continuous
+  start: "2020-01-01"
+  end: "2026-10-01"
+  cache_dir: data             # relative to snapback/; downloads are cached per symbol/year
+
+instruments:
+  NQ:
+    symbol: NQ.c.0
+    point_value: 20.0         # $ per index point, full-size NQ
+    tick_size: 0.25
+    commission_per_side: 2.10 # $ per contract per side, incl. exchange fees (assumption; edit to your broker)
+    slippage_ticks: 1         # each way, on every fill
+  GC:
+    symbol: GC.c.0
+    point_value: 100.0
+    tick_size: 0.10
+    commission_per_side: 2.10
+    slippage_ticks: 1
+
+account:
+  starting_equity: 100000
+  risk_per_trade: 0.01        # 1% of equity, sized from entry-to-stop distance
+  fractional_size: true       # true = exact 1% risk (clean R stats); false = whole contracts only
+
+strategy:
+  # 1. Opening box
+  box_open_time: "18:00"      # CME Globex reopen. Comparison: "09:00" with box_tz Asia/Tokyo (20:00/19:00 ET)
+  box_tz: America/New_York
+  skip_pct: null              # e.g. 10 -> skip days whose H is in the bottom/top 10% of the trailing 50 days
+  skip_lookback: 50
+  # 2. Break and snapback
+  entry_mode: snapback        # snapback | breakout (comparison: enter at the break candle's close)
+  max_wait_bars: 6
+  touch_depth: 0.0            # snapback low <= box_high - touch_depth*H. Negative = looser (e.g. -0.1)
+  require_turn_candle: true   # snapback candle must close in the trade direction (close > open for longs)
+  allow_reentry_after_close_inside: false
+  # 3. Stop loss
+  stop_k: 2.0                 # long stop = box_high - stop_k*H
+  be_trigger: 1.0             # move to breakeven once an hourly close is be_trigger*H in profit; null = off
+  be_buffer: 0.03             # breakeven stop = entry + be_buffer*H
+  trail_mode: swing           # swing | step | candle | points | off  (active after breakeven)
+  trail_buffer: 0.0           # swing mode
+  trail_step: 1.0             # step mode
+  trail_points: 1.0           # points mode, distance in H
+  # 4. Profit taking
+  target_mode: fixed          # fixed | hold | rr
+  fixed_tp: 1                 # fixed mode without partials: exit all at TP1 (1) or TP2 (2)
+  partials: false             # fixed mode: 50% at TP1, 50% at TP2
+  rr_target: 2.0              # rr mode
+  eod_exit: true              # flatten at the next session's box open
+
+validation:
+  in_sample_frac: 0.70
+  walk_forward_train_years: 2
+  walk_forward_test_months: 6
+  random_seeds: 50
+  min_trades_for_selection: 50
+
+# One parameter moved at a time around the confirmed strategy.
+sensitivity:
+  stop_k: [1.5, 2.5]
+  be_trigger: [0.5, null]
+  be_buffer: [0.0, 0.1]
+  touch_depth: [0.25, -0.1]
+  require_turn_candle: [false]
+  max_wait_bars: [3, 12]
+  allow_reentry_after_close_inside: [true]
+  skip_pct: [10, 20]
+  box_open_time:
+    - {box_open_time: "09:00", box_tz: Asia/Tokyo}
+  entry_mode: [breakout]
+  trail:
+    - {trail_mode: swing, trail_buffer: 0.1}
+    - {trail_mode: step, trail_step: 0.5}
+    - {trail_mode: step, trail_step: 1.0}
+    - {trail_mode: candle}
+    - {trail_mode: points, trail_points: 1.0}
+    - {trail_mode: points, trail_points: 2.0}
+    - {trail_mode: "off"}
+  target:
+    - {target_mode: fixed, fixed_tp: 2}
+    - {target_mode: fixed, partials: true}
+    - {target_mode: hold}
+    - {target_mode: rr, rr_target: 1.0}
+    - {target_mode: rr, rr_target: 2.0}
+    - {target_mode: rr, rr_target: 3.0}
+
+# In-sample parameter search (exits only; entries fixed to the confirmed rules).
+grid:
+  stop_k: [1.5, 2.0, 2.5]
+  be_trigger: [0.5, 1.0]
+  trail:
+    - {trail_mode: swing, trail_buffer: 0.0}
+    - {trail_mode: swing, trail_buffer: 0.1}
+    - {trail_mode: step, trail_step: 0.5}
+    - {trail_mode: step, trail_step: 1.0}
+    - {trail_mode: candle}
+    - {trail_mode: points, trail_points: 1.0}
+    - {trail_mode: points, trail_points: 2.0}
+    - {trail_mode: "off"}
+  target:
+    - {target_mode: fixed, fixed_tp: 1}
+    - {target_mode: fixed, partials: true}
+    - {target_mode: hold}
+    - {target_mode: rr, rr_target: 1.0}
+    - {target_mode: rr, rr_target: 2.0}
+    - {target_mode: rr, rr_target: 3.0}
+
+heatmap:
+  stop_k: [1.5, 2.0, 2.5]
+  be_trigger: [0.5, 1.0, null]
