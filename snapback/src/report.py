@@ -13,7 +13,8 @@ def stats(trades: pd.DataFrame, days: pd.DataFrame | None = None, risk: float = 
     out = {"trades": n}
     if days is not None and len(days):
         tradable = days[~days.outcome.isin(["roll", "zero_height", "skipped_size"])]
-        out["no_setup_pct"] = 100 * tradable.outcome.isin(["no_break", "no_snapback"]).mean() if len(tradable) else np.nan
+        no_setup = ["no_break", "no_snapback", "no_pullback", "no_rejection", "range_broken"]
+        out["no_setup_pct"] = 100 * tradable.outcome.isin(no_setup).mean() if len(tradable) else np.nan
     if n == 0:
         return out
     R = trades["R"].to_numpy()
