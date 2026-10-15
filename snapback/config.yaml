@@ -18,7 +18,7 @@ instruments:
     commission_per_side: 2.10 # $ per contract per side, incl. exchange fees (assumption; edit to your broker)
     slippage_ticks: 1         # each way, on every fill
   GC:
-    symbol: GC.c.0
+    symbol: GC.v.0   # highest-volume contract; GC.c.0 (calendar front) is an illiquid delivery month
     point_value: 100.0
     tick_size: 0.10
     commission_per_side: 2.10
