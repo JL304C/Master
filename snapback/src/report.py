@@ -137,8 +137,8 @@ def equity_chart(trades: pd.DataFrame, split_date, title: str, path, risk: float
     plt.close(fig)
 
 
-def heatmap_chart(grid: pd.DataFrame, title: str, path):
-    """grid: rows stop_k, cols be_trigger, values expectancy R."""
+def heatmap_chart(grid: pd.DataFrame, title: str, path, row_name: str = "stop_k", col_name: str = "be_trigger"):
+    """grid: rows/cols are two parameters' values, cells are expectancy in R."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -154,8 +154,8 @@ def heatmap_chart(grid: pd.DataFrame, title: str, path):
             ax.text(j, i, f"{vals[i, j]:+.3f}R", ha="center", va="center", color=INK, fontsize=10)
     ax.set_xticks(range(len(grid.columns)), [str(c) for c in grid.columns])
     ax.set_yticks(range(len(grid.index)), [str(r) for r in grid.index])
-    ax.set_xlabel("be_trigger (× H; None = no breakeven)", color=INK2, fontsize=9)
-    ax.set_ylabel("stop_k (× H)", color=INK2, fontsize=9)
+    ax.set_xlabel(f"{col_name} (None = off)", color=INK2, fontsize=9)
+    ax.set_ylabel(row_name, color=INK2, fontsize=9)
     ax.tick_params(colors=INK2, labelsize=9, length=0)
     for s in ax.spines.values():
         s.set_visible(False)

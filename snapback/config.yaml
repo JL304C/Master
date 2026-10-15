@@ -121,5 +121,55 @@ grid:
     - {target_mode: rr, rr_target: 3.0}
 
 heatmap:
-  stop_k: [1.5, 2.0, 2.5]
-  be_trigger: [0.5, 1.0, null]
+  rows: {stop_k: [1.5, 2.0, 2.5]}
+  cols: {be_trigger: [0.5, 1.0, null]}
+
+one_step_keys: [stop_k, be_trigger, touch_depth, max_wait_bars, be_buffer]
+
+# ---------------------------------------------------------------------------------------------
+# Variant B: US-open box (spec section 8b). Same engine, costs, sizing and validation.
+# `strategy` here overrides the Variant A values above. Run with: python -m src.run --variant B
+variant_b:
+  strategy:
+    variant: B
+    box_open_time: "09:00"      # futures hourly candle containing the 09:30 stock open. Comparison: "09:30"
+    box_tz: America/New_York
+    entry_mode: pullback        # pullback | breakout (comparison: enter at the 5-min break bar's close)
+    touch_depth: 0.0            # pullback low <= box_high - touch_depth*H
+    min_wick_ratio: 0.3         # pullback bar's lower wick / range (long); null = off
+    cancel_on_close_inside: false  # a 5-min close back inside the box cancels the setup
+    allow_reentry_after_close_inside: false
+    b_window_hours: 2           # entries only in the first N hours after the box closes; null = until eod_time
+    eod_time: "16:00"           # flat at 16:00 ET
+    eod_exit: true              # false = hold to target or stop, overnight if needed
+    skip_pct: null
+    stop_k: 1.0                 # long stop = box_high - 1*H = box low (opposite side of the box)
+    be_trigger: null            # no breakeven in this video
+    trail_mode: "off"
+    target_mode: fixed
+    target_base: entry
+    fixed_tp: 2                 # target = entry + 2*H (video: top of the second box, ~1:2 reward:risk)
+    partials: false
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    min_wick_ratio: [0.5, null]
+    touch_depth: [0.25, -0.1]
+    b_window_hours: [4, null]
+    fixed_tp: [1, 3]
+    stop_k: [0.5, 1.5]          # 0.5 = stop at the midline
+    cancel_on_close_inside: [true]
+    eod_exit: [false]
+    breakeven:
+      - {be_trigger: 1.0}
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+    entry_mode: [breakout]
+  grid:
+    min_wick_ratio: [0.3, 0.5, null]
+    b_window_hours: [2, 4, null]
+    fixed_tp: [1, 2, 3]
+    be_trigger: [null, 1.0]
+  heatmap:
+    rows: {fixed_tp: [1, 2, 3]}
+    cols: {min_wick_ratio: [0.3, 0.5, null]}
+  one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, fixed_tp, stop_k]

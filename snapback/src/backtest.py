@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .box import Market, Session, Setup, find_setup, sessions
+from .box import Market, Session, Setup, day_end_time, find_setup, find_setup_b, sessions
 
 
 @dataclass
@@ -43,8 +43,10 @@ def plan_levels(st: Setup, p: dict) -> tuple[float, list[tuple[float, float]]]:
         base = {"snap": st.snap_high, "entry": entry, "box": s.box_low}[tb]
     mode = p["target_mode"]
     if mode == "fixed":
-        tp1, tp2 = base + d * H, base + d * 2 * H
-        targets = [(tp1, 0.5), (tp2, 0.5)] if p["partials"] else [((tp1 if p["fixed_tp"] == 1 else tp2), 1.0)]
+        if p["partials"]:
+            targets = [(base + d * H, 0.5), (base + d * 2 * H, 0.5)]
+        else:
+            targets = [(base + d * p["fixed_tp"] * H, 1.0)]
     elif mode == "rr":
         targets = [(entry + p["rr_target"] * (entry - stop), 1.0)]
     elif mode == "hold":
@@ -56,8 +58,8 @@ def plan_levels(st: Setup, p: dict) -> tuple[float, list[tuple[float, float]]]:
 
 def simulate_trade(m: Market, st: Setup, p: dict, inst: Instrument,
                    stop_raw: float, targets_raw: list[tuple[float, float]], direction: int,
-                   last_hour: int) -> dict:
-    """Simulate one trade from the close of st.entry_i through hour `last_hour` (inclusive)."""
+                   last_i5: int) -> dict:
+    """Simulate one trade from the close of 5-min bar st.entry_i5 through 5-min bar last_i5 (inclusive)."""
     d = direction
     H = st.session.box_high - st.session.box_low
     slip = inst.slip
@@ -80,34 +82,35 @@ def simulate_trade(m: Market, st: Setup, p: dict, inst: Instrument,
     anchor_stop = None if be_trig is not None else init_stop
     best_high = entry - slip
     max_close = entry - slip
-    prev_hi, prev_hi_j = h1[st.entry_i], st.entry_i
+    j0 = int(m.hr5[st.entry_i5])
+    prev_hi, prev_hi_j = h5[m.s5[j0]:st.entry_i5 + 1].max(), j0
     be_time = None
 
     remaining = 1.0
     fills = []  # (fraction, price, t5 index, reason)
 
-    for j in range(st.entry_i + 1, last_hour + 1):
-        for i in range(m.s5[j], m.e5[j]):
-            if o5[i] <= stop:
-                fills.append((remaining, o5[i] - slip, i, "stop_gap"))
-                remaining = 0.0
-            elif l5[i] <= stop:
-                fills.append((remaining, stop - slip, i, "stop"))
-                remaining = 0.0
-            else:
-                while targets and remaining > 1e-9:
-                    px, f = targets[0]
-                    if h5[i] < px:
-                        break
-                    f = min(f, remaining)
-                    fill = max(px, o5[i]) - slip
-                    fills.append((f, fill, i, "target"))
-                    remaining -= f
-                    targets.pop(0)
-            if remaining <= 1e-9:
-                break
+    for i in range(st.entry_i5 + 1, last_i5 + 1):
+        if o5[i] <= stop:
+            fills.append((remaining, o5[i] - slip, i, "stop_gap"))
+            remaining = 0.0
+        elif l5[i] <= stop:
+            fills.append((remaining, stop - slip, i, "stop"))
+            remaining = 0.0
+        else:
+            while targets and remaining > 1e-9:
+                px, f = targets[0]
+                if h5[i] < px:
+                    break
+                f = min(f, remaining)
+                fill = max(px, o5[i]) - slip
+                fills.append((f, fill, i, "target"))
+                remaining -= f
+                targets.pop(0)
         if remaining <= 1e-9:
             break
+        j = int(m.hr5[i])
+        if i != m.e5[j] - 1:
+            continue
 
         # hourly close: breakeven then trailing (stop only moves in the trade's favour)
         hh, hl, hc = h1[j], l1[j], c1[j]
@@ -137,8 +140,7 @@ def simulate_trade(m: Market, st: Setup, p: dict, inst: Instrument,
             prev_hi, prev_hi_j = hh, j
 
     if remaining > 1e-9:
-        i = m.e5[last_hour] - 1
-        fills.append((remaining, c5[i] - slip, i, "session_end"))
+        fills.append((remaining, c5[last_i5] - slip, last_i5, "session_end"))
 
     pts = sum(f * (px - entry) for f, px, _, _ in fills)
     pv, comm = inst.point_value, inst.commission_per_side
@@ -170,7 +172,7 @@ def detect(m: Market, p: dict) -> tuple[list[Session], list[tuple[Session, Setup
         if s.status != "ok":
             out.append((s, None, s.status))
             continue
-        st, why = find_setup(m, s, p)
+        st, why = (find_setup_b if p.get("variant") == "B" else find_setup)(m, s, p)
         out.append((s, st, why))
     return ss, out
 
@@ -190,12 +192,15 @@ def run(m: Market, p: dict, inst: Instrument, acct: dict, detected=None,
         if st is None:
             days.append(day)
             continue
-        if m.s5[st.entry_i] <= busy_until:
+        if st.entry_i5 <= busy_until:
             day["outcome"] = "position_open"
             days.append(day)
             continue
-        last_hour = s.end_i - 1 if p["eod_exit"] else len(m.t1) - 1
-        if st.entry_i >= last_hour:
+        if p["eod_exit"]:
+            last_i5 = int(np.searchsorted(m.t5, day_end_time(m, s, p).as_unit("ns").value, side="left")) - 1
+        else:
+            last_i5 = len(m.t5) - 1
+        if st.entry_i5 >= last_i5:
             day["outcome"] = "entry_at_session_end"
             days.append(day)
             continue
@@ -205,7 +210,7 @@ def run(m: Market, p: dict, inst: Instrument, acct: dict, detected=None,
             d = -d
             stop = 2 * st.entry_raw - stop
             targets = [(2 * st.entry_raw - px, f) for px, f in targets]
-        res = simulate_trade(m, st, p, inst, stop, targets, d, last_hour)
+        res = simulate_trade(m, st, p, inst, stop, targets, d, last_i5)
         if "skip" in res:
             day["outcome"] = res["skip"]
             days.append(day)
@@ -224,8 +229,8 @@ def run(m: Market, p: dict, inst: Instrument, acct: dict, detected=None,
         trades.append({
             "date": s.date, "instrument": inst.name, "direction": res["direction"],
             "box_high": s.box_high, "box_low": s.box_low, "H": H,
-            "break_time": m.t1[st.break_i] + pd.Timedelta(hours=1),
-            "entry_time": m.t1[st.entry_i] + pd.Timedelta(hours=1),
+            "break_time": st.break_time, "entry_time": st.entry_time,
+            "entry_vs_mid": "above" if st.entry_raw > (s.box_high + s.box_low) / 2 else "below",
             "entry_price": res["entry_price"], "stop": res["stop"], "targets": res["targets"],
             "exit_time": res["exit_time"], "exit_price": res["exit_price"], "exit_reason": res["exit_reason"],
             "be_hit": res["be_hit"], "first_target_R": res["first_target_R"], "R": res["R"], "R_gross": res["R_gross"],

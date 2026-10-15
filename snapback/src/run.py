@@ -1,4 +1,6 @@
-"""Variant A backtest driver.
+"""Backtest driver for Variant A (Asian-session box) and Variant B (US-open box).
+
+    python -m src.run --variant B        # Variant B report in results/variant_b/
 
     python -m src.run --estimate         # Databento price for the data not yet cached
     python -m src.run --download         # download and cache (after you approve the price)
@@ -20,7 +22,8 @@ from .backtest import Instrument, detect, run
 from .box import build_market
 
 ROOT = Path(__file__).resolve().parent.parent
-ENTRY_KEYS = ("box_open_time", "box_tz", "skip_pct", "skip_lookback", "entry_mode", "max_wait_bars",
+ENTRY_KEYS = ("variant", "min_wick_ratio", "cancel_on_close_inside", "b_window_hours", "eod_time",
+              "box_open_time", "box_tz", "skip_pct", "skip_lookback", "entry_mode", "max_wait_bars",
               "touch_depth", "require_turn_candle", "allow_reentry_after_close_inside")
 
 
@@ -55,7 +58,7 @@ class Lab:
         return self._m[off]
 
     def run(self, p, rng=None):
-        key = tuple(p[k] for k in ENTRY_KEYS)
+        key = tuple(p.get(k) for k in ENTRY_KEYS)
         m = self.market(p)
         if key not in self._d:
             self._d[key] = detect(m, p)[1]
@@ -88,7 +91,7 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
 
     trades.to_csv(outdir / f"trades_{name}.csv", index=False)
     days.to_csv(outdir / f"days_{name}.csv", index=False)
-    report.equity_chart(trades, split_date, f"{name}: Snapback Variant A, confirmed rules", outdir / f"equity_{name}.png", risk)
+    report.equity_chart(trades, split_date, f"{name}: Snapback {cfg['title']}, confirmed rules", outdir / f"equity_{name}.png", risk)
 
     # ---- baselines (out-of-sample) ----
     rows = {"Strategy (confirmed rules)": s_oos}
@@ -158,18 +161,19 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
                         "OOS win %": b.get("win_rate")}
     pd.DataFrame(sens).T.to_csv(outdir / f"sensitivity_{name}.csv")
 
-    # ---- heatmap stop_k x be_trigger (in-sample) ----
-    hm = cfg["heatmap"]
-    grid = pd.DataFrame(index=hm["stop_k"], columns=[str(b) for b in hm["be_trigger"]], dtype=float)
-    for k in hm["stop_k"]:
-        for b in hm["be_trigger"]:
-            t, _ = lab.run({**p0, "stop_k": k, "be_trigger": b})
+    # ---- heatmap of two parameters (in-sample) ----
+    (rk, rvals), = cfg["heatmap"]["rows"].items()
+    (ck, cvals), = cfg["heatmap"]["cols"].items()
+    grid = pd.DataFrame(index=[str(r) for r in rvals], columns=[str(c) for c in cvals], dtype=float)
+    for r in rvals:
+        for c in cvals:
+            t, _ = lab.run({**p0, rk: r, ck: c})
             ti = split(t, split_date)[0]
-            grid.loc[k, str(b)] = ti["R"].mean() if len(ti) else np.nan
-    report.heatmap_chart(grid, f"{name}: in-sample expectancy (R per trade)", outdir / f"heatmap_{name}.png")
+            grid.loc[str(r), str(c)] = ti["R"].mean() if len(ti) else np.nan
+    report.heatmap_chart(grid, f"{name}: in-sample expectancy (R per trade)", outdir / f"heatmap_{name}.png", rk, ck)
 
     # ---- pass criteria (confirmed rules, out-of-sample) ----
-    one_step = [v for k, v in sens.items() if k != "confirmed rules" and k.split("=")[0] in ("stop_k", "be_trigger", "touch_depth", "max_wait_bars", "be_buffer")]
+    one_step = [v for k, v in sens.items() if k != "confirmed rules" and k.split("=")[0] in cfg["one_step_keys"]]
     collapse = any((v["OOS exp R"] is None or not np.isfinite(v["OOS exp R"]) or v["OOS exp R"] <= 0) for v in one_step)
     checks = {
         "Positive OOS expectancy after costs": s_oos.get("expectancy_R", -1) > 0,
@@ -183,6 +187,9 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
     cols = ["trades", "win_rate", "breakeven_win_rate", "avg_win_R", "avg_loss_R", "expectancy_R", "profit_factor",
             "max_dd_pct", "longest_losing_streak", "sharpe", "no_setup_pct"]
     long_short = {f"{d} (OOS)": report.stats(t_oos[t_oos.direction == d], None, risk) for d in ("long", "short")}
+    if p0.get("variant") == "B" and len(t_oos):
+        for side in ("above", "below"):
+            long_short[f"entry {side} midline (OOS)"] = report.stats(t_oos[t_oos.entry_vs_mid == side], None, risk)
     md = [f"## {name}\n",
           f"Sessions: {len(dates)} ({pd.Timestamp(dates[0]).date()} → {pd.Timestamp(dates[-1]).date()}); "
           f"in-sample before {split_date.date()}, out-of-sample after. "
@@ -201,7 +208,7 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
           f"out-of-sample {bh_oos.get('return_pct', float('nan')):.1f}% (Sharpe {bh_oos.get('sharpe', float('nan')):.2f}, "
           f"max DD {bh_oos.get('max_dd_pct', float('nan')):.1f}%).\n",
           "\n### In-sample grid pick, checked out-of-sample\n",
-          f"Best of {len(combos)} exit combinations in-sample: `{label(best_ov)}`\n\n",
+          f"Best of {len(combos)} parameter combinations in-sample: `{label(best_ov)}`\n\n",
           report.fmt_table({"In-sample (picked here)": sel_is, "Out-of-sample": sel_oos}, cols),
           "\n### Walk-forward\n",
           report.fmt_table({"Walk-forward (stitched test windows)": s_wf}, ["trades", "win_rate", "expectancy_R", "profit_factor", "max_dd_pct"]),
@@ -223,10 +230,19 @@ def main():
     ap.add_argument("--download", action="store_true")
     ap.add_argument("--csv", action="append", default=[], help="NAME=path to 1- or 5-minute OHLC CSV")
     ap.add_argument("--only", nargs="*", help="instrument names to run")
-    ap.add_argument("--out", default=str(ROOT / "results"))
+    ap.add_argument("--variant", choices=["A", "B"], default="A")
+    ap.add_argument("--out")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
+    if args.variant == "B":
+        vb = cfg["variant_b"]
+        cfg = {**cfg, "strategy": {**cfg["strategy"], **vb["strategy"]},
+               **{k: vb[k] for k in ("sensitivity", "grid", "heatmap", "one_step_keys")}}
+        cfg["title"] = "Variant B (US-open box)"
+    else:
+        cfg["title"] = "Variant A (Asian-session box)"
+    args.out = args.out or str(ROOT / ("results/variant_b" if args.variant == "B" else "results"))
     dcfg = cfg["data"]
     cache = ROOT / dcfg["cache_dir"]
     names = args.only or list(cfg["instruments"])
@@ -256,7 +272,7 @@ def main():
         sections.append(md)
         verdicts[n] = checks
 
-    lines = ["# Snapback Variant A: backtest report\n",
+    lines = [f"# Snapback {cfg['title']}: backtest report\n",
              "All R figures are after commission and slippage. Win rate is compared with the break-even win rate "
              "implied by the average win and loss.\n",
              "\n## Verdict\n"]
