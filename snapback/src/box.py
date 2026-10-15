@@ -79,6 +79,7 @@ class Setup:
     entry_i5: int = -1  # 5-min bar whose close is the entry (last 5-min bar of entry_i for Variant A)
     break_time: pd.Timestamp | None = None
     entry_time: pd.Timestamp | None = None
+    stopped_in_bar: bool = False  # stop-order entry whose own 5-min bar also reached the stop
 
 
 def sessions(m: Market, p: dict) -> list[Session]:
@@ -184,6 +185,8 @@ def find_setup_b(m: Market, s: Session, p: dict) -> tuple[Setup | None, str]:
     td = p["touch_depth"]
     wr = p.get("min_wick_ratio")
     breakout = p["entry_mode"] == "breakout"
+    stop_entry = p["entry_mode"] == "stop"   # buy-stop / sell-stop resting at the box edges
+    tick = p.get("tick_size", 0.0)
     cancel_inside = p.get("cancel_on_close_inside", False)
     reentry = p["allow_reentry_after_close_inside"]
 
@@ -199,6 +202,19 @@ def find_setup_b(m: Market, s: Session, p: dict) -> tuple[Setup | None, str]:
     saw_break = False
     for i in range(i0, i1):
         o, h, l, c = m.o5[i], m.h5[i], m.l5[i], m.c5[i]
+        if stop_entry:
+            up, dn = h >= bh + tick, l <= bl - tick
+            if up and dn:
+                return None, "both_edges_one_bar"   # can't tell which filled first: skip the day
+            if up or dn:
+                d = 1 if up else -1
+                edge = bh + tick if up else bl - tick
+                fill = max(o, edge) if up else min(o, edge)  # gap through the edge fills at the open
+                five = pd.Timedelta(minutes=5)
+                st = Setup(s, d, int(m.hr5[i]), int(m.hr5[i]), fill, l, h, i, ts5(m, i), ts5(m, i) + five)
+                st.stopped_in_bar = (l <= bl) if up else (h >= bh)  # same 5-min bar also reached the stop
+                return st, "entry"
+            continue
         side = 1 if c > bh else (-1 if c < bl else 0)
         for d in (1, -1):
             if state[d] == "armed":

@@ -79,6 +79,7 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
     icfg = cfg["instruments"][name]
     inst = Instrument(name, icfg["point_value"], icfg["tick_size"], icfg["commission_per_side"], icfg["slippage_ticks"])
     acct, p0, val = cfg["account"], cfg["strategy"], cfg["validation"]
+    p0 = {**p0, "tick_size": inst.tick_size}
     lab = Lab(bars5, inst, acct)
     risk = acct["risk_per_trade"]
 
@@ -95,8 +96,9 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
 
     # ---- baselines (out-of-sample) ----
     rows = {"Strategy (confirmed rules)": s_oos}
-    bo, bo_days = lab.run({**p0, "entry_mode": "breakout"})
-    rows["Enter on first touch, no wick filter" if p0.get("variant") == "C" else "Immediate breakout entry"] = report.stats(split(bo, split_date)[1], split(bo_days, split_date)[1], risk)
+    bo, bo_days = lab.run({**p0, "entry_mode": "stop" if p0.get("variant") == "D" else "breakout"})
+    bo_label = {"C": "Enter on first touch, no wick filter", "D": "Stop-order entry at the box edge"}.get(p0.get("variant"), "Immediate breakout entry")
+    rows[bo_label] = report.stats(split(bo, split_date)[1], split(bo_days, split_date)[1], risk)
     rand_exp = []
     for seed in range(val["random_seeds"]):
         rt, _ = lab.run(p0, np.random.default_rng(seed))
@@ -230,14 +232,18 @@ def main():
     ap.add_argument("--download", action="store_true")
     ap.add_argument("--csv", action="append", default=[], help="NAME=path to 1- or 5-minute OHLC CSV")
     ap.add_argument("--only", nargs="*", help="instrument names to run")
-    ap.add_argument("--variant", choices=["A", "B", "C"], default="A")
+    ap.add_argument("--variant", choices=["A", "B", "C", "D"], default="A")
     ap.add_argument("--out")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
-    titles = {"A": "Variant A (Asian-session box)", "B": "Variant B (US-open box)", "C": "Variant C (US-open range fade)"}
+    titles = {"A": "Variant A (Asian-session box)", "B": "Variant B (US-open box)", "C": "Variant C (US-open range fade)",
+              "D": "Variant D (US-open breakout, no pullback)"}
     if args.variant != "A":
         vb = cfg[f"variant_{args.variant.lower()}"]
+        if vb.get("inherit"):
+            vb = {**cfg[vb["inherit"]], **{k: v for k, v in vb.items() if k != "strategy"},
+                  "strategy": {**cfg[vb["inherit"]]["strategy"], **vb["strategy"]}}
         cfg = {**cfg, "strategy": {**cfg["strategy"], **vb["strategy"]},
                **{k: vb[k] for k in ("sensitivity", "grid", "heatmap", "one_step_keys")}}
     cfg["title"] = titles[args.variant]

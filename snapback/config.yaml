@@ -213,3 +213,33 @@ variant_c:
     rows: {c_stop_buffer: [0.1, 0.25, 0.5]}
     cols: {min_wick_ratio: [0.3, 0.5, null]}
   one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, c_stop_buffer]
+
+# ---------------------------------------------------------------------------------------------
+# Variant D: US-open breakout with no pullback and no fade. Long on a 5-minute close above the box,
+# short on a close below. Same box, stop, target and exit as Variant B. Run: python -m src.run --variant D
+variant_d:
+  inherit: variant_b
+  strategy:
+    variant: D
+    entry_mode: breakout        # breakout (5-min close beyond the box) | stop (stop order at the edge, +1 tick)
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    entry_mode: [stop]
+    b_window_hours: [4, null]
+    fixed_tp: [1, 3]
+    stop_k: [0.5, 1.5]          # 0.5 = stop at the midline
+    eod_exit: [false]
+    breakeven:
+      - {be_trigger: 1.0}
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+  grid:
+    entry_mode: [breakout, stop]
+    b_window_hours: [2, 4, null]
+    fixed_tp: [1, 2, 3]
+    stop_k: [0.5, 1.0]
+    be_trigger: [null, 1.0]
+  heatmap:
+    rows: {fixed_tp: [1, 2, 3]}
+    cols: {stop_k: [0.5, 1.0, 1.5]}
+  one_step_keys: [b_window_hours, fixed_tp, stop_k]

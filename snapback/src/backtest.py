@@ -15,7 +15,7 @@ import pandas as pd
 
 from .box import Market, Session, Setup, day_end_time, find_setup, find_setup_b, find_setup_c, sessions
 
-FINDERS = {"A": find_setup, "B": find_setup_b, "C": find_setup_c}
+FINDERS = {"A": find_setup, "B": find_setup_b, "C": find_setup_c, "D": find_setup_b}
 
 
 @dataclass
@@ -90,6 +90,16 @@ def simulate_trade(m: Market, st: Setup, p: dict, inst: Instrument,
     anchor_stop = None if be_trig is not None else init_stop
     best_high = entry - slip
     max_close = entry - slip
+    if st.stopped_in_bar:
+        # filled and stopped inside the same 5-minute bar (conservative: stop assumed hit after the fill)
+        fills = [(1.0, stop - slip, st.entry_i5, "stop")]
+        pts = stop - slip - entry
+        pv, comm = inst.point_value, inst.commission_per_side
+        return {"direction": "long" if d == 1 else "short", "entry_price": d * entry, "stop": d * init_stop,
+                "targets": ";".join(f"{px:.2f}" for px, _ in targets_raw),
+                "exit_time": st.entry_time, "exit_price": d * (stop - slip), "exit_reason": "stop",
+                "be_hit": False, "first_target_R": float("nan"), "risk_pts": risk_pts, "pts": pts,
+                "R": (pts * pv - 2 * comm) / (risk_pts * pv), "R_gross": pts / risk_pts, "exit_i5": st.entry_i5}
     j0 = int(m.hr5[st.entry_i5])
     prev_hi, prev_hi_j = h5[m.s5[j0]:st.entry_i5 + 1].max(), j0
     be_time = None
