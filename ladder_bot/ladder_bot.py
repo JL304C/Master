@@ -42,6 +42,7 @@ import json
 import math
 import os
 import sys
+import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 
@@ -270,7 +271,9 @@ def submit_mleg(api, legs, limit_price=None):
     from alpaca.trading.enums import OrderClass, TimeInForce
     leg_reqs = [OptionLegRequest(symbol=s, side=side, ratio_qty=ratio, position_intent=intent)
                 for s, side, ratio, intent in legs]
-    common = dict(qty=1, order_class=OrderClass.MLEG, time_in_force=TimeInForce.DAY, legs=leg_reqs)
+    # "ladder-" prefix tells this bot's orders apart from jev-loop's ("jevloop-") in the shared account
+    common = dict(qty=1, order_class=OrderClass.MLEG, time_in_force=TimeInForce.DAY, legs=leg_reqs,
+                  client_order_id=f"ladder-{uuid.uuid4().hex}")
     if limit_price is None:
         return api.trade.submit_order(MarketOrderRequest(**common))
     return api.trade.submit_order(LimitOrderRequest(limit_price=round(limit_price, 2), **common))
