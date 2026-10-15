@@ -33,13 +33,14 @@ def plan_levels(st: Setup, p: dict) -> tuple[float, list[tuple[float, float]]]:
     """Initial stop and [(target_price, fraction)] in raw prices for a setup."""
     s, d = st.session, st.direction
     H = s.box_high - s.box_low
+    entry = st.entry_raw
+    tb = p.get("target_base", "snap")
     if d == 1:
         stop = s.box_high - p["stop_k"] * H
-        base = st.snap_low
+        base = {"snap": st.snap_low, "entry": entry, "box": s.box_high}[tb]
     else:
         stop = s.box_low + p["stop_k"] * H
-        base = st.snap_high
-    entry = st.entry_raw
+        base = {"snap": st.snap_high, "entry": entry, "box": s.box_low}[tb]
     mode = p["target_mode"]
     if mode == "fixed":
         tp1, tp2 = base + d * H, base + d * 2 * H

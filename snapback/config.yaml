@@ -52,6 +52,8 @@ strategy:
   # 4. Profit taking
   target_mode: fixed          # fixed | hold | rr
   fixed_tp: 1                 # fixed mode without partials: exit all at TP1 (1) or TP2 (2)
+  target_base: snap           # fixed targets measured from: snap (snapback candle low/high, spec text),
+                              # entry (matches the video's numbers: TP1 ~1 x H above entry), box (box edge)
   partials: false             # fixed mode: 50% at TP1, 50% at TP2
   rr_target: 2.0              # rr mode
   eod_exit: true              # flatten at the next session's box open
@@ -85,6 +87,9 @@ sensitivity:
     - {trail_mode: points, trail_points: 2.0}
     - {trail_mode: "off"}
   target:
+    - {target_mode: fixed, target_base: entry}
+    - {target_mode: fixed, target_base: entry, partials: true}
+    - {target_mode: fixed, target_base: box}
     - {target_mode: fixed, fixed_tp: 2}
     - {target_mode: fixed, partials: true}
     - {target_mode: hold}
@@ -108,6 +113,8 @@ grid:
   target:
     - {target_mode: fixed, fixed_tp: 1}
     - {target_mode: fixed, partials: true}
+    - {target_mode: fixed, fixed_tp: 1, target_base: entry}
+    - {target_mode: fixed, partials: true, target_base: entry}
     - {target_mode: hold}
     - {target_mode: rr, rr_target: 1.0}
     - {target_mode: rr, rr_target: 2.0}

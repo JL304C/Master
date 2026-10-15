@@ -14,7 +14,7 @@ BASE = {
     "entry_mode": "snapback", "max_wait_bars": 6, "touch_depth": 0.0, "require_turn_candle": True,
     "allow_reentry_after_close_inside": False, "stop_k": 2.0, "be_trigger": 1.0, "be_buffer": 0.03,
     "trail_mode": "off", "trail_buffer": 0.0, "trail_step": 1.0, "trail_points": 1.0,
-    "target_mode": "hold", "fixed_tp": 1, "partials": False, "rr_target": 2.0, "eod_exit": True,
+    "target_mode": "hold", "fixed_tp": 1, "target_base": "snap", "partials": False, "rr_target": 2.0, "eod_exit": True,
 }
 NOCOST = Instrument("T", point_value=1.0, tick_size=0.25, commission_per_side=0.0, slippage_ticks=0)
 ACCT = {"starting_equity": 100_000, "risk_per_trade": 0.01, "fractional_size": True}
@@ -160,6 +160,8 @@ def test_stop_level_and_targets():
     st, _ = find_setup(m, s, p())
     stop, tg = plan_levels(st, p(target_mode="fixed", partials=True))
     assert stop == 90 and tg == [(118, 0.5), (128, 0.5)]  # snapback low 108 + 1H / + 2H
+    _, tg = plan_levels(st, p(target_mode="fixed", target_base="entry"))
+    assert tg == [(123, 1.0)]  # entry 113 + 1H
     stop, tg = plan_levels(st, p(target_mode="rr", rr_target=2))
     assert tg == [(113 + 2 * 23, 1.0)]
 
