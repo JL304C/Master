@@ -226,3 +226,36 @@ def _five_min_setup(m: Market, s: Session, d: int, brk: int, i: int) -> Setup:
     five = pd.Timedelta(minutes=5)
     return Setup(s, d, int(m.hr5[brk]), int(m.hr5[i]), m.c5[i], m.l5[i], m.h5[i], i,
                  ts5(m, brk) + five, ts5(m, i) + five)
+
+
+def find_setup_c(m: Market, s: Session, p: dict) -> tuple[Setup | None, str]:
+    """Variant C (range fade): while price stays inside the box, short a 5-minute rejection candle at the
+    box high (touches it, closes back inside, long upper wick) or buy the mirror image at the box low.
+    The first 5-minute close outside the box ends fading for the day."""
+    bh, bl = s.box_high, s.box_low
+    H = bh - bl
+    td = p["touch_depth"]
+    wr = p.get("min_wick_ratio")
+    first_touch = p["entry_mode"] == "breakout"   # comparison: enter on any touch that closes inside
+
+    box_close = m.t1[s.box_i] + pd.Timedelta(hours=1)
+    end = day_end_time(m, s, p)
+    if p.get("b_window_hours"):
+        end = min(end, box_close + pd.Timedelta(hours=p["b_window_hours"]))
+    i0 = int(m.e5[s.box_i])
+    i1 = int(np.searchsorted(m.t5, end.as_unit("ns").value, side="left"))
+
+    for i in range(i0, i1):
+        o, h, l, c = m.o5[i], m.h5[i], m.l5[i], m.c5[i]
+        if c > bh or c < bl:
+            return None, "range_broken"
+        rng = h - l
+        for d in (-1, 1):
+            touched = (h >= bh + td * H) if d == -1 else (l <= bl - td * H)
+            if not touched:
+                continue
+            wick = (h - max(o, c)) if d == -1 else (min(o, c) - l)
+            if first_touch or wr is None or (rng > 0 and wick / rng >= wr):
+                five = pd.Timedelta(minutes=5)
+                return Setup(s, d, int(m.hr5[i]), int(m.hr5[i]), c, l, h, i, ts5(m, i) + five, ts5(m, i) + five), "entry"
+    return None, "no_rejection"

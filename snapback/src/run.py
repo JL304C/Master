@@ -1,6 +1,6 @@
 """Backtest driver for Variant A (Asian-session box) and Variant B (US-open box).
 
-    python -m src.run --variant B        # Variant B report in results/variant_b/
+    python -m src.run --variant B        # Variant B report in results/variant_b/ (C likewise)
 
     python -m src.run --estimate         # Databento price for the data not yet cached
     python -m src.run --download         # download and cache (after you approve the price)
@@ -96,7 +96,7 @@ def backtest_instrument(name, bars5, cfg, outdir: Path) -> tuple[str, dict]:
     # ---- baselines (out-of-sample) ----
     rows = {"Strategy (confirmed rules)": s_oos}
     bo, bo_days = lab.run({**p0, "entry_mode": "breakout"})
-    rows["Immediate breakout entry"] = report.stats(split(bo, split_date)[1], split(bo_days, split_date)[1], risk)
+    rows["Enter on first touch, no wick filter" if p0.get("variant") == "C" else "Immediate breakout entry"] = report.stats(split(bo, split_date)[1], split(bo_days, split_date)[1], risk)
     rand_exp = []
     for seed in range(val["random_seeds"]):
         rt, _ = lab.run(p0, np.random.default_rng(seed))
@@ -230,19 +230,18 @@ def main():
     ap.add_argument("--download", action="store_true")
     ap.add_argument("--csv", action="append", default=[], help="NAME=path to 1- or 5-minute OHLC CSV")
     ap.add_argument("--only", nargs="*", help="instrument names to run")
-    ap.add_argument("--variant", choices=["A", "B"], default="A")
+    ap.add_argument("--variant", choices=["A", "B", "C"], default="A")
     ap.add_argument("--out")
     args = ap.parse_args()
 
     cfg = yaml.safe_load(open(args.config))
-    if args.variant == "B":
-        vb = cfg["variant_b"]
+    titles = {"A": "Variant A (Asian-session box)", "B": "Variant B (US-open box)", "C": "Variant C (US-open range fade)"}
+    if args.variant != "A":
+        vb = cfg[f"variant_{args.variant.lower()}"]
         cfg = {**cfg, "strategy": {**cfg["strategy"], **vb["strategy"]},
                **{k: vb[k] for k in ("sensitivity", "grid", "heatmap", "one_step_keys")}}
-        cfg["title"] = "Variant B (US-open box)"
-    else:
-        cfg["title"] = "Variant A (Asian-session box)"
-    args.out = args.out or str(ROOT / ("results/variant_b" if args.variant == "B" else "results"))
+    cfg["title"] = titles[args.variant]
+    args.out = args.out or str(ROOT / ("results" if args.variant == "A" else f"results/variant_{args.variant.lower()}"))
     dcfg = cfg["data"]
     cache = ROOT / dcfg["cache_dir"]
     names = args.only or list(cfg["instruments"])

@@ -13,7 +13,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from .box import Market, Session, Setup, day_end_time, find_setup, find_setup_b, sessions
+from .box import Market, Session, Setup, day_end_time, find_setup, find_setup_b, find_setup_c, sessions
+
+FINDERS = {"A": find_setup, "B": find_setup_b, "C": find_setup_c}
 
 
 @dataclass
@@ -34,6 +36,12 @@ def plan_levels(st: Setup, p: dict) -> tuple[float, list[tuple[float, float]]]:
     s, d = st.session, st.direction
     H = s.box_high - s.box_low
     entry = st.entry_raw
+    if p.get("variant") == "C":
+        # fade: stop just beyond the edge being faded, target the other side of the box or the midline
+        edge = s.box_low if d == 1 else s.box_high
+        stop = edge - d * p["c_stop_buffer"] * H
+        target = (s.box_high if d == 1 else s.box_low) if p["c_target"] == "opposite" else (s.box_high + s.box_low) / 2
+        return stop, [(target, 1.0)]
     tb = p.get("target_base", "snap")
     if d == 1:
         stop = s.box_high - p["stop_k"] * H
@@ -172,7 +180,7 @@ def detect(m: Market, p: dict) -> tuple[list[Session], list[tuple[Session, Setup
         if s.status != "ok":
             out.append((s, None, s.status))
             continue
-        st, why = (find_setup_b if p.get("variant") == "B" else find_setup)(m, s, p)
+        st, why = FINDERS[p.get("variant", "A")](m, s, p)
         out.append((s, st, why))
     return ss, out
 

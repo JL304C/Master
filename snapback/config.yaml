@@ -173,3 +173,43 @@ variant_b:
     rows: {fixed_tp: [1, 2, 3]}
     cols: {min_wick_ratio: [0.3, 0.5, null]}
   one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, fixed_tp, stop_k]
+
+# ---------------------------------------------------------------------------------------------
+# Variant C: US-open range fade (spec section 8b, optional). Fade the box edges while price stays inside.
+# Run with: python -m src.run --variant C
+variant_c:
+  strategy:
+    variant: C
+    box_open_time: "09:00"
+    box_tz: America/New_York
+    entry_mode: rejection       # rejection | breakout (comparison: enter on the first touch, no wick filter)
+    touch_depth: 0.0            # short needs high >= box_high + touch_depth*H; negative = near-misses count
+    min_wick_ratio: 0.3         # wick on the faded side / bar range; null = off
+    b_window_hours: 2           # entries 10:00-12:00 ET; null = until eod_time
+    eod_time: "16:00"
+    eod_exit: true
+    skip_pct: null
+    c_stop_buffer: 0.25         # stop 0.25*H beyond the faded edge
+    c_target: opposite          # opposite (other side of the box) | mid (midline)
+    be_trigger: null
+    trail_mode: "off"
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    min_wick_ratio: [0.5, null]
+    touch_depth: [-0.1]
+    b_window_hours: [4, null]
+    c_stop_buffer: [0.1, 0.5]
+    c_target: [mid]
+    breakeven:
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+    entry_mode: [breakout]
+  grid:
+    min_wick_ratio: [0.3, 0.5, null]
+    b_window_hours: [2, 4, null]
+    c_stop_buffer: [0.1, 0.25, 0.5]
+    c_target: [opposite, mid]
+  heatmap:
+    rows: {c_stop_buffer: [0.1, 0.25, 0.5]}
+    cols: {min_wick_ratio: [0.3, 0.5, null]}
+  one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, c_stop_buffer]
