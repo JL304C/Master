@@ -230,16 +230,18 @@ def main():
     dcfg = cfg["data"]
     cache = ROOT / dcfg["cache_dir"]
     names = args.only or list(cfg["instruments"])
-    symbols = [cfg["instruments"][n]["symbol"] for n in names]
+
+    def dcfg_for(n):
+        return {**dcfg, **{k: v for k, v in cfg["instruments"][n].items() if k in ("start", "end")}}
 
     if args.estimate:
         print("Databento cost estimate for uncached data:")
-        total = data.estimate_cost(symbols, dcfg, cache)
+        total = sum(data.estimate_cost([cfg["instruments"][n]["symbol"]], dcfg_for(n), cache) for n in names)
         print(f"TOTAL: ${total:,.2f}")
         return
     if args.download:
-        for s in symbols:
-            data.download(s, dcfg, cache)
+        for n in names:
+            data.download(cfg["instruments"][n]["symbol"], dcfg_for(n), cache)
         return
 
     csvs = dict(c.split("=", 1) for c in args.csv)
@@ -247,7 +249,7 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
     sections, verdicts = [], {}
     for n in names:
-        raw = data.load_csv(csvs[n]) if n in csvs else data.load_1m(cfg["instruments"][n]["symbol"], dcfg, cache)
+        raw = data.load_csv(csvs[n]) if n in csvs else data.load_1m(cfg["instruments"][n]["symbol"], dcfg_for(n), cache)
         bars5 = data.resample(raw, "5min")
         print(f"{n}: {len(bars5):,} five-minute bars, running...")
         md, checks = backtest_instrument(n, bars5, cfg, outdir)
