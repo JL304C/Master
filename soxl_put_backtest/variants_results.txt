@@ -1,0 +1,9 @@
+                                            final_x  cagr  max_dd  puts  itm  weeks_in_shares  weeks  y2021  y2022  y2023  y2024  y2025  y2026
+rule                                                                                                                                          
+1 wheel as written                            1.408 0.070  -0.719   167   15               93    260  1.297  0.602  0.926  0.994  0.865  1.408
+2 wheel, calls never below cost               1.753 0.117  -0.869    25    4              235    260  1.297  0.235  0.708  0.725  1.050  1.753
+3 wheel + no-below-cost + stop -25%           1.861 0.131  -0.598   189   19               71    260  1.297  0.621  0.955  1.270  1.149  1.861
+4 hold shares, no calls, sell at breakeven    1.794 0.123  -0.863    47    7              213    260  1.099  0.213  0.681  0.691  1.041  1.794
+5 no wheel: take loss in cash at expiry       1.590 0.096  -0.564   258   25                0    260  1.026  1.139  1.588  0.986  1.019  1.590
+6 roll put at same strike                     2.193 0.168  -0.616   258   70                0    260  1.102  0.764  1.153  0.912  1.097  2.193
+{'final_x': np.float64(2.1778565471226083), 'cagr': np.float64(0.1663968563101963), 'max_dd': np.float64(-0.9057901251547242)}

@@ -1,0 +1,5 @@
+.env
+soxl_roll_log.jsonl
+soxl_roll_trades.csv
+pending_roll.json
+__pycache__/
