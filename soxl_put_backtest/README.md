@@ -14,3 +14,6 @@ Assumptions:
 - Event flags cover only NVDA earnings and jobs-report Fridays.
 
 SOXL listed only monthly options until September 2021, so the weekly test starts at 2021-09-24. The monthly run (30-DTE put, EM from the ~60-DTE expiration) covers 2018-05 to 2026-10, which includes the 2020 crash.
+
+## What to do when a put finishes in the money (`variants.py`)
+`variants.py` compares 6 rules for handling a put that finishes in the money: the wheel as written, calls never struck below cost basis, that rule plus a −25% stop, holding the shares until breakeven, taking the loss in cash, and rolling the put at the same strike. Results are in `variants_results.txt`.

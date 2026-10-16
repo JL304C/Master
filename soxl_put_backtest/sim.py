@@ -78,7 +78,9 @@ def price_on(day):
     idx = daily.index[daily.index<=day]
     return daily.close.loc[idx[-1]]
 
-def run(rounding="down", prem_rule="A", em_source="double", wheel=True):
+def run(rounding="down", prem_rule="A", em_source="double", wheel=True, after="wheel", stop=0.25):
+    if after in ("nowheel","roll"): wheel=False
+    roll_K = None
     days = sorted(snaps)
     A = 1.0             # account value (normalized); fractional contracts so capital compounds
     cash, sh, basis = 1.0, 0.0, None
@@ -110,10 +112,16 @@ def run(rounding="down", prem_rule="A", em_source="double", wheel=True):
                 rec["pnl1"] = pos["prem1"]-COMM - max(0,K-Sx)*100
                 if assigned and wheel: cash -= K*100*n; sh += 100*n; basis = K
                 elif assigned: cash -= (K-Sx)*100*n
+                if assigned and after=="roll": roll_K = K
+                elif pos["cp"]=="P": roll_K = None
             else:
                 rec["pnl1"] = pos["prem1"]-COMM
                 if assigned: cash += K*100*n; sh -= 100*n; rec["share_pnl1"]=(K-basis)*100; basis=None; sh=0 if abs(sh)<1e-9 else sh
             one.append(rec); pos=None
+        if sh>1e-9 and not pos and basis and (
+            (after=="hold" and S>=basis) or (after=="stop" and S<=basis*(1-stop))):
+            rec = dict(open=d, exp=d, cp="S", K=basis, spot0=S, spotx=S, prem1=0, assigned=False, flag=False, pnl1=0, share_pnl1=(S-basis)*100)
+            one.append(rec); cash += sh*S; sh = 0; basis = None
         A = cash + sh*S
         if pos:   # mark open short option at mid (fallback: intrinsic)
             m = q[(q.exp==pos["exp"])&(q.cp==pos["cp"])&(abs(q.K-pos["K"])<1e-6)]
@@ -130,12 +138,17 @@ def run(rounding="down", prem_rule="A", em_source="double", wheel=True):
         flag = bool(((NVDA_EARN>d)&(NVDA_EARN<=t)).any()) or any(x.weekday()==4 and x.day<=7 for x in pd.date_range(d+pd.Timedelta(days=1),t))
         if sh<=1e-9:
             ch = q[(q.exp==t)&(q.cp=="P")&(q.bid_px_00>0)]
-            row = choose(ch, S-em, "P", rounding, prem_rule)
+            if roll_K is not None and roll_K in set(ch.K):
+                row = ch[ch.K==roll_K].iloc[0]
+            else:
+                row = choose(ch, S-em, "P", rounding, prem_rule)
             if row is None: continue
             n = A/(row.K*100)
         else:
+            if after=="hold": continue
             ch = q[(q.exp==t)&(q.cp=="C")&(q.bid_px_00>0)]
-            row = choose(ch, S+em, "C", "up" if rounding=="down" else "nearest", prem_rule)
+            tgt = max(S+em, basis) if after in ("floor","stop") else S+em
+            row = choose(ch, tgt, "C", "up" if rounding=="down" else "nearest", prem_rule)
             if row is None: continue
             n = sh/100
         prem1 = row.bid_px_00*100
