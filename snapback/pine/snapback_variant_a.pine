@@ -1,0 +1,153 @@
+//@version=6
+// Snapback Entry, Variant A (Asian-session opening box) - visual cross-check of the Python backtest.
+// Use on a 1-hour chart of OANDA:NAS100USD or OANDA:XAUUSD. The Python/Databento backtest is the official result.
+// Rules mirror snapback/config.yaml defaults: 18:00 ET box (wick to wick), break = 1h close outside,
+// snapback = later 1h candle whose wick re-enters the box but closes outside (and turns), entry at that close,
+// stop 2 x H beyond the box edge, breakeven after a close 1 x H in profit, swing trail, TP1 = snapback low + 1 x H,
+// one trade per day, flat at the 16:00-17:00 ET candle's close.
+// Note: TradingView fills stops/targets inside an hour with its own bar-path assumption; the Python version uses
+// 5-minute bars and assumes the stop is hit first when both are touched.
+strategy("Snapback Variant A", overlay = true, process_orders_on_close = true, calc_on_every_tick = false,
+     initial_capital = 100000, commission_type = strategy.commission.percent, commission_value = 0.0, slippage = 1)
+
+tz          = input.string("America/New_York", "Time zone")
+boxHour     = input.int(18, "Box candle hour (ET)", 0, 23)
+eodHour     = input.int(17, "Flatten on the candle closing at (ET hour)", 0, 23)
+maxWait     = input.int(6, "Max bars from break to snapback", 1)
+touchDepth  = input.float(0.0, "Touch depth (x H into box; negative = looser)")
+requireTurn = input.bool(true, "Snapback candle must close in trade direction")
+allowReentry = input.bool(false, "Allow re-arm after a close back inside")
+stopK       = input.float(2.0, "Stop: k x H from the break edge")
+useBE       = input.bool(true, "Use breakeven")
+beTrigger   = input.float(1.0, "Breakeven trigger (x H, on a close)")
+beBuffer    = input.float(0.03, "Breakeven buffer (x H)")
+trailMode   = input.string("swing", "Trail mode (after breakeven)", options = ["swing", "candle", "points", "off"])
+trailBuffer = input.float(0.0, "Swing trail buffer (x H)")
+trailPoints = input.float(1.0, "Points trail distance (x H)")
+targetMode  = input.string("fixed", "Target mode", options = ["fixed", "hold", "rr"])
+fixedTp     = input.int(1, "Fixed target: TP1 (1) or TP2 (2)", 1, 2)
+rrTarget    = input.float(2.0, "RR target (R)")
+riskPct     = input.float(1.0, "Risk per trade (% of equity)")
+
+// ---------- state ----------
+var float boxHi = na
+var float boxLo = na
+var float H = na
+var bool traded = false
+var int lState = 0  // 0 idle, 1 armed, 2 wait for close inside, 3 dead
+var int sState = 0
+var int lBrk = na
+var int sBrk = na
+var int dir = 0
+var float entry = na
+var float stopPx = na
+var float tpPx = na
+var bool beDone = false
+var float bestPx = na
+var float prevExt = na
+var float pbExt = na
+
+isBox = hour(time, tz) == boxHour and minute(time, tz) == 0
+isEod = hour(time_close, tz) == eodHour
+
+if strategy.position_size == 0 and dir != 0
+    dir := 0
+
+if isBox
+    boxHi := high
+    boxLo := low
+    H := high - low
+    traded := false
+    lState := 0
+    sState := 0
+    lBrk := na
+    sBrk := na
+else if not na(H) and H > 0
+    // ---------- manage open trade at the hourly close ----------
+    if dir != 0
+        // dir-normalised prices: for shorts, everything is mirrored
+        c = dir * close
+        hi = dir == 1 ? high : -low
+        lo = dir == 1 ? low : -high
+        e = dir * entry
+        s = dir * stopPx
+        if useBE and not beDone and c >= e + beTrigger * H
+            beDone := true
+            s := math.max(s, e + beBuffer * H)
+        if beDone or not useBE
+            if trailMode == "swing" and hi > prevExt and not na(pbExt)
+                s := math.max(s, pbExt - trailBuffer * H)
+            else if trailMode == "candle"
+                s := math.max(s, lo)
+            else if trailMode == "points"
+                s := math.max(s, math.max(bestPx, hi) - trailPoints * H)
+        bestPx := math.max(bestPx, hi)
+        if hi > prevExt
+            prevExt := hi
+            pbExt := na
+        else
+            pbExt := na(pbExt) ? lo : math.min(pbExt, lo)
+        stopPx := dir * s
+        strategy.exit("x", stop = stopPx, limit = tpPx)
+
+    // ---------- look for the setup ----------
+    else if not traded and not isEod
+        side = close > boxHi ? 1 : close < boxLo ? -1 : 0
+        int enter = 0
+        // long
+        if lState == 1
+            if side == -1
+                lState := 3
+            else if side == 0
+                lState := allowReentry ? 0 : 3
+            else
+                if low <= boxHi - touchDepth * H and (close > open or not requireTurn)
+                    enter := 1
+                else if bar_index - lBrk >= maxWait
+                    lState := allowReentry ? 2 : 3
+        else if lState == 2 and side == 0
+            lState := 0
+        else if lState == 0 and side == 1
+            lState := 1
+            lBrk := bar_index
+        // short
+        if enter == 0
+            if sState == 1
+                if side == 1
+                    sState := 3
+                else if side == 0
+                    sState := allowReentry ? 0 : 3
+                else
+                    if high >= boxLo + touchDepth * H and (close < open or not requireTurn)
+                        enter := -1
+                    else if bar_index - sBrk >= maxWait
+                        sState := allowReentry ? 2 : 3
+            else if sState == 2 and side == 0
+                sState := 0
+            else if sState == 0 and side == -1
+                sState := 1
+                sBrk := bar_index
+
+        if enter != 0
+            dir := enter
+            entry := close
+            stopPx := enter == 1 ? boxHi - stopK * H : boxLo + stopK * H
+            base = enter == 1 ? low : high
+            tpPx := targetMode == "fixed" ? base + enter * fixedTp * H : targetMode == "rr" ? close + rrTarget * (close - stopPx) : na
+            riskPts = math.abs(close - stopPx)
+            qty = strategy.equity * riskPct / 100 / (riskPts * syminfo.pointvalue)
+            beDone := false
+            bestPx := enter * close
+            prevExt := enter == 1 ? high : -low
+            pbExt := na
+            traded := true
+            strategy.entry(enter == 1 ? "L" : "S", enter == 1 ? strategy.long : strategy.short, qty = qty)
+            strategy.exit("x", stop = stopPx, limit = tpPx)
+
+if isEod and strategy.position_size != 0
+    strategy.close_all("session end")
+
+plot(boxHi, "Box high", color.new(#2a78d6, 0), 1, plot.style_linebr)
+plot(boxLo, "Box low", color.new(#2a78d6, 0), 1, plot.style_linebr)
+plot(strategy.position_size != 0 ? stopPx : na, "Stop", color.new(#e34948, 0), 1, plot.style_linebr)
+plot(strategy.position_size != 0 ? tpPx : na, "Target", color.new(#1baf7a, 0), 1, plot.style_linebr)

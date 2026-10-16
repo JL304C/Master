@@ -1,0 +1,245 @@
+# Snapback Entry backtest: Variant A (Asian-session opening box).
+# Every rule from the spec is a parameter. The values under `strategy` are the
+# confirmed rules from the video; `sensitivity` and `grid` hold the comparisons.
+
+data:
+  dataset: GLBX.MDP3
+  schema: ohlcv-1m            # 1-minute bars, resampled to 5-minute and 1-hour locally
+  stype_in: continuous
+  start: "2020-01-01"
+  end: "2026-10-01"
+  cache_dir: data             # relative to snapback/; downloads are cached per symbol/year
+
+instruments:
+  NQ:
+    symbol: NQ.c.0
+    point_value: 20.0         # $ per index point, full-size NQ
+    tick_size: 0.25
+    commission_per_side: 2.10 # $ per contract per side, incl. exchange fees (assumption; edit to your broker)
+    slippage_ticks: 1         # each way, on every fill
+  GC:
+    symbol: GC.v.0   # highest-volume contract; GC.c.0 (calendar front) is an illiquid delivery month
+    point_value: 100.0
+    tick_size: 0.10
+    commission_per_side: 2.10
+    slippage_ticks: 1
+
+account:
+  starting_equity: 100000
+  risk_per_trade: 0.01        # 1% of equity, sized from entry-to-stop distance
+  fractional_size: true       # true = exact 1% risk (clean R stats); false = whole contracts only
+
+strategy:
+  # 1. Opening box
+  box_open_time: "18:00"      # CME Globex reopen. Comparison: "09:00" with box_tz Asia/Tokyo (20:00/19:00 ET)
+  box_tz: America/New_York
+  skip_pct: null              # e.g. 10 -> skip days whose H is in the bottom/top 10% of the trailing 50 days
+  skip_lookback: 50
+  # 2. Break and snapback
+  entry_mode: snapback        # snapback | breakout (comparison: enter at the break candle's close)
+  max_wait_bars: 6
+  touch_depth: 0.0            # snapback low <= box_high - touch_depth*H. Negative = looser (e.g. -0.1)
+  require_turn_candle: true   # snapback candle must close in the trade direction (close > open for longs)
+  allow_reentry_after_close_inside: false
+  # 3. Stop loss
+  stop_k: 2.0                 # long stop = box_high - stop_k*H
+  be_trigger: 1.0             # move to breakeven once an hourly close is be_trigger*H in profit; null = off
+  be_buffer: 0.03             # breakeven stop = entry + be_buffer*H
+  trail_mode: swing           # swing | step | candle | points | off  (active after breakeven)
+  trail_buffer: 0.0           # swing mode
+  trail_step: 1.0             # step mode
+  trail_points: 1.0           # points mode, distance in H
+  # 4. Profit taking
+  target_mode: fixed          # fixed | hold | rr
+  fixed_tp: 1                 # fixed mode without partials: exit all at TP1 (1) or TP2 (2)
+  target_base: snap           # fixed targets measured from: snap (snapback candle low/high, spec text),
+                              # entry (matches the video's numbers: TP1 ~1 x H above entry), box (box edge)
+  partials: false             # fixed mode: 50% at TP1, 50% at TP2
+  rr_target: 2.0              # rr mode
+  eod_exit: true              # flatten at the next session's box open
+
+validation:
+  in_sample_frac: 0.70
+  walk_forward_train_years: 2
+  walk_forward_test_months: 6
+  random_seeds: 50
+  min_trades_for_selection: 50
+
+# One parameter moved at a time around the confirmed strategy.
+sensitivity:
+  stop_k: [1.5, 2.5]
+  be_trigger: [0.5, null]
+  be_buffer: [0.0, 0.1]
+  touch_depth: [0.25, -0.1]
+  require_turn_candle: [false]
+  max_wait_bars: [3, 12]
+  allow_reentry_after_close_inside: [true]
+  skip_pct: [10, 20]
+  box_open_time:
+    - {box_open_time: "09:00", box_tz: Asia/Tokyo}
+  entry_mode: [breakout]
+  trail:
+    - {trail_mode: swing, trail_buffer: 0.1}
+    - {trail_mode: step, trail_step: 0.5}
+    - {trail_mode: step, trail_step: 1.0}
+    - {trail_mode: candle}
+    - {trail_mode: points, trail_points: 1.0}
+    - {trail_mode: points, trail_points: 2.0}
+    - {trail_mode: "off"}
+  target:
+    - {target_mode: fixed, target_base: entry}
+    - {target_mode: fixed, target_base: entry, partials: true}
+    - {target_mode: fixed, target_base: box}
+    - {target_mode: fixed, fixed_tp: 2}
+    - {target_mode: fixed, partials: true}
+    - {target_mode: hold}
+    - {target_mode: rr, rr_target: 1.0}
+    - {target_mode: rr, rr_target: 2.0}
+    - {target_mode: rr, rr_target: 3.0}
+
+# In-sample parameter search (exits only; entries fixed to the confirmed rules).
+grid:
+  stop_k: [1.5, 2.0, 2.5]
+  be_trigger: [0.5, 1.0]
+  trail:
+    - {trail_mode: swing, trail_buffer: 0.0}
+    - {trail_mode: swing, trail_buffer: 0.1}
+    - {trail_mode: step, trail_step: 0.5}
+    - {trail_mode: step, trail_step: 1.0}
+    - {trail_mode: candle}
+    - {trail_mode: points, trail_points: 1.0}
+    - {trail_mode: points, trail_points: 2.0}
+    - {trail_mode: "off"}
+  target:
+    - {target_mode: fixed, fixed_tp: 1}
+    - {target_mode: fixed, partials: true}
+    - {target_mode: fixed, fixed_tp: 1, target_base: entry}
+    - {target_mode: fixed, partials: true, target_base: entry}
+    - {target_mode: hold}
+    - {target_mode: rr, rr_target: 1.0}
+    - {target_mode: rr, rr_target: 2.0}
+    - {target_mode: rr, rr_target: 3.0}
+
+heatmap:
+  rows: {stop_k: [1.5, 2.0, 2.5]}
+  cols: {be_trigger: [0.5, 1.0, null]}
+
+one_step_keys: [stop_k, be_trigger, touch_depth, max_wait_bars, be_buffer]
+
+# ---------------------------------------------------------------------------------------------
+# Variant B: US-open box (spec section 8b). Same engine, costs, sizing and validation.
+# `strategy` here overrides the Variant A values above. Run with: python -m src.run --variant B
+variant_b:
+  strategy:
+    variant: B
+    box_open_time: "09:00"      # futures hourly candle containing the 09:30 stock open. Comparison: "09:30"
+    box_tz: America/New_York
+    entry_mode: pullback        # pullback | breakout (comparison: enter at the 5-min break bar's close)
+    touch_depth: 0.0            # pullback low <= box_high - touch_depth*H
+    min_wick_ratio: 0.3         # pullback bar's lower wick / range (long); null = off
+    cancel_on_close_inside: false  # a 5-min close back inside the box cancels the setup
+    allow_reentry_after_close_inside: false
+    b_window_hours: 2           # entries only in the first N hours after the box closes; null = until eod_time
+    eod_time: "16:00"           # flat at 16:00 ET
+    eod_exit: true              # false = hold to target or stop, overnight if needed
+    skip_pct: null
+    stop_k: 1.0                 # long stop = box_high - 1*H = box low (opposite side of the box)
+    be_trigger: null            # no breakeven in this video
+    trail_mode: "off"
+    target_mode: fixed
+    target_base: entry
+    fixed_tp: 2                 # target = entry + 2*H (video: top of the second box, ~1:2 reward:risk)
+    partials: false
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    min_wick_ratio: [0.5, null]
+    touch_depth: [0.25, -0.1]
+    b_window_hours: [4, null]
+    fixed_tp: [1, 3]
+    stop_k: [0.5, 1.5]          # 0.5 = stop at the midline
+    cancel_on_close_inside: [true]
+    eod_exit: [false]
+    breakeven:
+      - {be_trigger: 1.0}
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+    entry_mode: [breakout]
+  grid:
+    min_wick_ratio: [0.3, 0.5, null]
+    b_window_hours: [2, 4, null]
+    fixed_tp: [1, 2, 3]
+    be_trigger: [null, 1.0]
+  heatmap:
+    rows: {fixed_tp: [1, 2, 3]}
+    cols: {min_wick_ratio: [0.3, 0.5, null]}
+  one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, fixed_tp, stop_k]
+
+# ---------------------------------------------------------------------------------------------
+# Variant C: US-open range fade (spec section 8b, optional). Fade the box edges while price stays inside.
+# Run with: python -m src.run --variant C
+variant_c:
+  strategy:
+    variant: C
+    box_open_time: "09:00"
+    box_tz: America/New_York
+    entry_mode: rejection       # rejection | breakout (comparison: enter on the first touch, no wick filter)
+    touch_depth: 0.0            # short needs high >= box_high + touch_depth*H; negative = near-misses count
+    min_wick_ratio: 0.3         # wick on the faded side / bar range; null = off
+    b_window_hours: 2           # entries 10:00-12:00 ET; null = until eod_time
+    eod_time: "16:00"
+    eod_exit: true
+    skip_pct: null
+    c_stop_buffer: 0.25         # stop 0.25*H beyond the faded edge
+    c_target: opposite          # opposite (other side of the box) | mid (midline)
+    be_trigger: null
+    trail_mode: "off"
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    min_wick_ratio: [0.5, null]
+    touch_depth: [-0.1]
+    b_window_hours: [4, null]
+    c_stop_buffer: [0.1, 0.5]
+    c_target: [mid]
+    breakeven:
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+    entry_mode: [breakout]
+  grid:
+    min_wick_ratio: [0.3, 0.5, null]
+    b_window_hours: [2, 4, null]
+    c_stop_buffer: [0.1, 0.25, 0.5]
+    c_target: [opposite, mid]
+  heatmap:
+    rows: {c_stop_buffer: [0.1, 0.25, 0.5]}
+    cols: {min_wick_ratio: [0.3, 0.5, null]}
+  one_step_keys: [min_wick_ratio, touch_depth, b_window_hours, c_stop_buffer]
+
+# ---------------------------------------------------------------------------------------------
+# Variant D: US-open breakout with no pullback and no fade. Long on a 5-minute close above the box,
+# short on a close below. Same box, stop, target and exit as Variant B. Run: python -m src.run --variant D
+variant_d:
+  inherit: variant_b
+  strategy:
+    variant: D
+    entry_mode: breakout        # breakout (5-min close beyond the box) | stop (stop order at the edge, +1 tick)
+  sensitivity:
+    box_open_time: [{box_open_time: "09:30"}]
+    entry_mode: [stop]
+    b_window_hours: [4, null]
+    fixed_tp: [1, 3]
+    stop_k: [0.5, 1.5]          # 0.5 = stop at the midline
+    eod_exit: [false]
+    breakeven:
+      - {be_trigger: 1.0}
+      - {be_trigger: 0.5}
+    skip_pct: [10]
+  grid:
+    entry_mode: [breakout, stop]
+    b_window_hours: [2, 4, null]
+    fixed_tp: [1, 2, 3]
+    stop_k: [0.5, 1.0]
+    be_trigger: [null, 1.0]
+  heatmap:
+    rows: {fixed_tp: [1, 2, 3]}
+    cols: {stop_k: [0.5, 1.0, 1.5]}
+  one_step_keys: [b_window_hours, fixed_tp, stop_k]
