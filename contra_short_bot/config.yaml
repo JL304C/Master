@@ -13,6 +13,9 @@ data:
   # regular-session daily bars for the level library (prices only matter there).
   daily_dataset: XNAS.ITCH
   daily_start: "2018-05-01"
+  # Live session bars: Alpaca SIP stream (Algo Trader Plus). Subscribing to bars for
+  # "*" gives every US stock, which the Contra / relative-weakness scanners need.
+  live_feed: alpaca_sip
   index_proxies: {SPY: 1.0, QQQ: 1.0, IWM: 0.5, DIA: 0.5}
   extra_symbols: [SMH]
   # Ticker changes: the old ticker is used for dates before `until`.
