@@ -176,8 +176,30 @@ strategies:
 risk:
   risk_per_trade: 0.005        # planned risk for the full position, entry to stop
   max_notional: 0.20
+  max_open_positions: 3        # open positions + working entry orders
+  daily_loss_limit: 0.015      # realized + open loss -> no new entries today
+  weekly_loss_limit: 0.04      # -> pause for the rest of the week
+  kill_switch: false           # true: cancel everything, flatten, no entries
 
 session:
   first_entry: "09:31"
   last_entry: "15:30"
   flatten: "15:55"
+
+# Section 7: Trade Manager.
+trade:
+  target_mode: structure       # structure | risk_multiple | hybrid
+  target_r: [1.0, 2.0, 3.0]    # T1/T2/T3 = first support at least 1R/2R/3R below entry
+  ladder_r: [2.0, 3.0, 4.0]    # risk_multiple targets, and the fallback when structure runs out
+  hybrid_min_r: 1.5            # no support >= 1.5R below -> T1 = 2R
+  inside_min: 0.03             # limits sit max($0.03, 0.10 x ATR5) above the support
+  inside_atr5: 0.10
+  trail_atr5: 0.25             # runner stop: latest 5m lower high + 0.25 x ATR5
+  breakeven_after: 1           # after T1, stop to breakeven
+
+# Section 10: fill model (conservative).
+fills:
+  entry_slip_bps: 2
+  stop_slip_bps: 3
+  scenario_a_extra_bps: 5      # stop within 1 tick of the obvious extreme
+  limit_through: 0.01          # limits fill only if price trades through by $0.01

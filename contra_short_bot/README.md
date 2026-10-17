@@ -9,7 +9,7 @@ An intraday short-selling bot built from `STRATEGY_SPEC.md` (Mike Herman / Warri
 | 2. Daily level library (pivots, major swings, trendlines, gaps, moving averages, round numbers, prior/52-week highs, manual levels), unit tests, level charts | done, reviewed against TradingView |
 | 2b. Stock selection: market tone, scanners, Daily Watchlist, prep sheet | done |
 | 3. Rejection Engine, strategies A, B, C, D and A0, replay tool with setup charts | done |
-| 4. Trade Manager, risk, backtester | not started |
+| 4. Trade Manager, risk limits, simulated broker, event-driven backtester | done |
 | 5. Backtest report | not started |
 | 6. Alpaca paper runner | not started |
 
@@ -36,7 +36,25 @@ The universe is the favorites list (`watchlist.yaml`), plus SPY, QQQ, IWM, DIA a
 - `strategies/fades.py`: which levels belong to A (pivots, major swings, manual levels, moving averages, 52-week high; strength ≥ 3), B (trendlines; entry_mode `confirmed_only`, extension 1.5 × ATR5) and C (gap fill).
 - `strategies/d_downtrend_continuation.py`: D, which shorts pullbacks into the falling 5-minute EMA20 after a ≥ 3 × ATR5 drop on RVOL ≥ 2 (or a Trendsell trigger). It makes up to 3 entries under one risk budget and exits when the trend breaks.
 - `engine/trader.py`: one `SymbolTrader` per stock lets only one setup hold an order or position at a time. It adds stocks to the watchlist intraday, and `DayGate` applies the entry window and the live market-tone policy.
-- `engine/replay.py`: replays days with a simple fill model and writes a decision log, trades and setup charts. **This is not the backtest.** There are no profit targets, breakeven or trailing stops until the Trade Manager (step 4).
+- `engine/replay.py`: replays chosen days through the backtest's day loop and writes the decision log, the trades and 1-minute setup charts.
+
+## Trade management, risk and backtest (spec 7, 8, 10)
+- `trade/manager.py`:
+  - **Targets:** T1, T2 and T3 are the first support levels at ≥ 1R, 2R and 3R below the entry. Supports are session VWAP, the low of day, today's 5-minute swing lows, daily support zones and the prior day's low.
+  - **Limits** sit max($0.03, 0.10 × ATR5) above the support.
+  - **Hybrid minimum:** if no support lies ≥ 1.5R below the entry, T1 is set at 2R.
+  - **Exits:** cover 1/3 at T1 and move the stop to breakeven, cover 1/3 at T2, then trail the last 1/3 at the latest 5-minute lower high + 0.25 × ATR5.
+  - Strategy D only exits at structure levels.
+- `risk/limits.py`: max 3 open positions (including working entries), the −1.5% daily loss limit (realized + open), and the kill switch. Sizing (`risk/sizing.py`) risks 0.5% of equity per full position, capped at 20% notional.
+- `execution/sim_broker.py`: the spec's conservative fill model:
+  - Sell-stop entries fill at the trigger (or a gap-through open), less 2 bps.
+  - Stop exits fill at the stop (or a gap-through open), plus 3 bps, plus 5 more for a Scenario A stop.
+  - Limits fill only when price trades $0.01 through them.
+  - Stop before target when both are in one bar, and stopped out on the entry bar if that bar reached the new stop.
+- `backtest/runner.py`: the day loop (bar fills → strategies → Trade Manager) and a parallel multi-year driver:
+  - Sizing uses a fixed $1M, so days are independent; the −4% weekly limit is applied afterwards in date order.
+  - The first 60% of days are in-sample and the rest out-of-sample.
+  - Output goes to `reports/backtest/<name>/`: `trades.csv` (one row per position, with level, test, trigger, boosters, score, tones, watchlist reason, focus data, targets hit, R, MFE/MAE), the log, a config snapshot and `run.json`.
 
 ## Commands
 ```
@@ -48,6 +66,7 @@ python -m tools.level_charts --n 20          # charts + levels table -> reports/
 python -m tools.level_charts --symbol NVDA --day 2025-08-20
 python -m selection.watchlist --day 2024-03-08 --hits   # prep sheet -> reports/prep/
 python -m engine.replay --start 2024-03-04 --end 2024-03-15 --charts   # -> reports/replay/
+python -m backtest.runner --start 2018-06-01 --end 2026-10-15 --workers 4 --name base   # ~2-3 h
 ```
 
 ## Choices made beyond the spec
@@ -66,4 +85,9 @@ Each one is marked in `config.yaml`.
   - FOCUS ends only when Vdif falls 0.5 × ATR5 below its start, which stops it switching on and off every minute.
   - The add order lives 5 bars, and `confirmed_only` gives the lower high 20 bars to appear.
 - **A-level filter.** Prior-day highs/lows and round numbers add strength but are not A levels on their own. Merged zones are capped at 0.6 × ATRd (was 1.0), and double tops pair swings within 0.25 × ATRd.
+- **Backtest simplifications:**
+  - Sizing equity is fixed at $1M (no compounding), so days can run in parallel.
+  - The weekly loss limit is applied after the run.
+  - Target mode `hybrid` is the same as `structure`, because the hybrid 2R minimum is always on.
+  - T3 is recorded, but the last third trails rather than exiting at T3.
 - **Strength defaults.** These are starting values: gap fill 3, gap entry 2, 200SMA 2, 52-week high 2, other moving averages and prior-day levels 1. Pivot strength = touches + 1 per 3 months of span (max 4) + 1 per high-volume touch (max 2).

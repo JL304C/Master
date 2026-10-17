@@ -3,6 +3,7 @@ closed before `day`, on the share basis in force on `day`."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 
 import pandas as pd
 
@@ -63,7 +64,14 @@ def build_levels_from_daily(daily: pd.DataFrame, symbol: str, day: pd.Timestamp,
 
 
 def build_levels(symbol: str, day, cfg: dict | None = None) -> DayLevels:
-    """Levels for `symbol` before the open on `day`."""
+    """Levels for `symbol` before the open on `day` (cached per symbol and day)."""
+    if cfg is None:
+        return _build_levels_cached(symbol, pd.Timestamp(day).normalize())
     day = pd.Timestamp(day).normalize()
     daily = adjust_daily(daily_bars(symbol), symbol, day)
     return build_levels_from_daily(daily, symbol, day, cfg)
+
+
+@lru_cache(maxsize=256)
+def _build_levels_cached(symbol: str, day: pd.Timestamp) -> DayLevels:
+    return build_levels(symbol, day, load_config())

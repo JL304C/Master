@@ -90,8 +90,13 @@ def daily_bars(symbol: str) -> pd.DataFrame:
 
 @lru_cache(maxsize=48)
 def minutes(symbol: str) -> pd.DataFrame:
-    """All cached 1-minute bars for a symbol (premarket, regular and after hours)."""
-    return load_minutes(symbol)
+    """Cached 1-minute bars for a symbol, 04:00-16:00 ET (after hours dropped), as
+    float32 to keep a multi-year, multi-symbol backtest in memory."""
+    df = load_minutes(symbol)
+    t = df.index.time
+    df = df[(t >= PRE_START) & (t < RTH_END)]
+    return df.astype({"open": "float32", "high": "float32", "low": "float32", "close": "float32",
+                      "volume": "float32"})
 
 
 def sessions(symbol: str) -> pd.DatetimeIndex:
