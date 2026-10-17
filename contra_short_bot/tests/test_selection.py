@@ -66,7 +66,7 @@ def test_five_minute_values_only_after_bar_completes():
     idx5 = pd.date_range("2024-05-08 09:30", periods=3, freq="5min", tz=ET)
     s5 = pd.Series([1.0, 2.0, 3.0], index=idx5)
     idx1 = pd.date_range("2024-05-08 09:30", periods=15, freq="1min", tz=ET)
-    a = sc._at_completion(s5, idx1)
+    a = sc.at_completion(s5, idx1)
     assert a.iloc[:4].isna().all()                       # 09:30-09:33: first 5m bar still open
     assert a.iloc[4] == 1.0                              # the 09:34 bar closes at 09:35 with it
     assert a.iloc[9] == 2.0                              # 09:39

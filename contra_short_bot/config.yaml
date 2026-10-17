@@ -45,7 +45,7 @@ levels:
     suppress_atr: 1.5          # only the strongest pivot within 1.5 x ATRd is kept [ADDED]
   swing:                       # major zigzag swings as levels, even with 1-2 touches [ADDED]
     strength: 2                # per swing; a double top at the same price = 4
-    twin_atr: 0.5              # two major swings within 0.5 x ATRd = double top/bottom
+    twin_atr: 0.25             # two major swings within 0.25 x ATRd = double top/bottom
     zone_atr: 0.15
   trendline:
     zigzag_atr: 3.0            # major swings need a >= 3 x ATRd reversal
@@ -69,7 +69,7 @@ levels:
     confluence_bonus: 1
   manual_strength: 5
   merge_atr: 0.5               # zones closer than 0.5 x ATRd merge
-  merge_max_width_atr: 1.0     # ...but a merged zone stays <= 1 x ATRd wide [ADDED]
+  merge_max_width_atr: 0.6     # ...but a merged zone stays <= 0.6 x ATRd wide [ADDED; was 1.0, too wide to trade from]
   max_open_above_atr: 3.0      # skip a level if today's open is > 3 x ATRd above it
 
 selection:
@@ -129,3 +129,55 @@ selection:
     focus_bonus: 3
     focus_resistance_atr: 1.0
     drop_after_idle_min: 60
+
+# Section 4: the Rejection Engine shared by A, B, C (and A0). [DEFAULT] unless noted.
+engine:
+  armed_atr5: 1.0              # ARMED: price within 1 x ATR5 below the zone
+  extension:
+    speed_atr5: 2.0            # climbed >= 2 x ATR5 ...
+    speed_minutes: 15          # ... within the last 15 minutes
+    open_minutes: 30           # or spiked into the zone in the first 30 minutes
+    wide_body_mult: 1.5        # or >= 2 consecutive 1m bodies >= 1.5 x the session's average body
+    wide_body_bars: 2
+    lookback_bars: 5           # the wide bodies must be among the last 5 bars
+  max_bars_outside: 3          # closes beyond the zone top for more than 3 bars = level failed
+  rejection_close_frac: 0.5    # rejection bar closes in its lower half
+  min_zone_reach: 0.5          # the spike must reach at least the zone's midpoint [ADDED]
+  leave_zone_atr5: 0.5         # a test ends when price closes 0.5 x ATR5 below the zone
+  stops_going_up_run: 3        # FOCUS trigger: first red bar without a higher high after >= 3 higher highs
+  entry_valid_bars: 3          # Entry 1 sell-stop lives 3 one-minute bars
+  scenario_b: {atr1: 0.5, pct: 0.001}   # initial stop = spike high + max(0.5 x ATR1, 0.1%)
+  scenario_c_atr1: 0.25        # after the add: lower high + 0.25 x ATR1
+  add_valid_bars: 5            # Entry 2 sell-stop lives 5 bars [ADDED]
+  confirm_window_bars: 20      # confirmed_only: the lower high must come within 20 bars of the rejection [ADDED]
+  max_attempts: 2              # first test + second test, never a third
+  focus_timeout_min: 30
+  focus_vdif_tolerance_atr5: 0.5   # FOCUS ends when Vdif falls 0.5 x ATR5 below its start [ADDED: stops flapping]
+  booster_window_bars: 5       # boosters count if seen within the last 5 bars of the test
+
+strategies:
+  enabled: [A, B, C, D, A0]    # A0 = Contra exhaustion with no level, for comparison
+  entry_mode: {A: scaled, B: confirmed_only, C: scaled, A0: scaled}   # scaled | confirmed_only | aggressive_only
+  A: {min_strength: 3}
+  B: {speed_atr5: 1.5}
+  D:
+    drop_atr5: 3.0             # initial move: >= 3 x ATR5 down from the session high (or prior close) ...
+    min_rvol: 2.0              # ... on RVOL >= 2, or a Trendsell trigger
+    lower_highs: 2             # 5m downtrend: >= 2 lower highs, below a falling EMA20
+    ema_slope_bars: 3
+    ema_zone_atr5: 0.15        # pullback: 5m high reaches EMA20 - 0.15 x ATR5, closes below EMA20
+    stop_atr5: 0.25            # stop = pullback high + 0.25 x ATR5
+    entry_valid_bars: 5
+    max_entries: 3
+  boosters: {volume_climax: 1, volume_ramp: 1, body_constriction: 1, contra_tier: 1, quickstrike: 2,
+             sp_top_reversal: 1, gap_reversal: 1}
+
+# Section 8 (sizing only for now; limits and kill switch come with the Trade Manager).
+risk:
+  risk_per_trade: 0.005        # planned risk for the full position, entry to stop
+  max_notional: 0.20
+
+session:
+  first_entry: "09:31"
+  last_entry: "15:30"
+  flatten: "15:55"

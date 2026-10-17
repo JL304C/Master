@@ -8,7 +8,7 @@ An intraday short-selling bot built from `STRATEGY_SPEC.md` (Mike Herman / Warri
 | 1. Data layer: Databento 1-minute bars, daily and 2/5-minute aggregation, split adjustment | done |
 | 2. Daily level library (pivots, major swings, trendlines, gaps, moving averages, round numbers, prior/52-week highs, manual levels), unit tests, level charts | done, reviewed against TradingView |
 | 2b. Stock selection: market tone, scanners, Daily Watchlist, prep sheet | done |
-| 3. Rejection Engine and strategies A–D | not started |
+| 3. Rejection Engine, strategies A, B, C, D and A0, replay tool with setup charts | done |
 | 4. Trade Manager, risk, backtester | not started |
 | 5. Backtest report | not started |
 | 6. Alpaca paper runner | not started |
@@ -31,6 +31,13 @@ The universe is the favorites list (`watchlist.yaml`), plus SPY, QQQ, IWM, DIA a
 - `selection/scanners.py`: Pre Market Bid Up / Ask Down 3.5%, new premarket highs and lows, Gap Up / Down Static, Contra Short and Contra Long (dollar or ATR-normalized Vdif tiers), Quickstrike High and Low, SP Top Reversal, Para Up, 5 green candles, Gap Up and Go Up / Gap Down and Go Down, gap reversal, Trendsell, and relative weakness vs SPY. Each row uses only bars completed by the end of that minute.
 - `selection/watchlist.py`: the 09:25 Daily Watchlist with rank, reasons and focus stocks, plus the prep sheet in Mike's format. Run `python -m selection.watchlist --day 2024-03-08 --hits` to also list that session's scanner prints, including which Contra Short prints were at a level.
 
+## Strategies (spec 4–5)
+- `engine/rejection.py`: the Rejection Engine shared by A, B, C and A0. One `Setup` follows one level through the states: armed, extension (speed, opening spike or wide candles), exhaustion boosters scored into `setup_score`, then rejection. A rejection is either a close back inside the zone in the lower half of the bar, or, in FOCUS, the first red bar without a higher high. Then come the Scenario B starter, the add on a 1m lower high plus a 2m close below its EMA9 (with the Scenario C stop and the risk cap), the disconnect rule, the second test and the level-failure rule. FOCUS (state 1b) tracks Contra Short runs, Vdif and Quickstrike→Contra timing.
+- `strategies/fades.py`: which levels belong to A (pivots, major swings, manual levels, moving averages, 52-week high; strength ≥ 3), B (trendlines; entry_mode `confirmed_only`, extension 1.5 × ATR5) and C (gap fill).
+- `strategies/d_downtrend_continuation.py`: D, which shorts pullbacks into the falling 5-minute EMA20 after a ≥ 3 × ATR5 drop on RVOL ≥ 2 (or a Trendsell trigger). It makes up to 3 entries under one risk budget and exits when the trend breaks.
+- `engine/trader.py`: one `SymbolTrader` per stock lets only one setup hold an order or position at a time. It adds stocks to the watchlist intraday, and `DayGate` applies the entry window and the live market-tone policy.
+- `engine/replay.py`: replays days with a simple fill model and writes a decision log, trades and setup charts. **This is not the backtest.** There are no profit targets, breakeven or trailing stops until the Trade Manager (step 4).
+
 ## Commands
 ```
 pip install -r requirements.txt
@@ -40,6 +47,7 @@ python -m tools.check_splits
 python -m tools.level_charts --n 20          # charts + levels table -> reports/levels/
 python -m tools.level_charts --symbol NVDA --day 2025-08-20
 python -m selection.watchlist --day 2024-03-08 --hits   # prep sheet -> reports/prep/
+python -m engine.replay --start 2024-03-04 --end 2024-03-15 --charts   # -> reports/replay/
 ```
 
 ## Choices made beyond the spec
@@ -52,4 +60,10 @@ Each one is marked in `config.yaml`.
 - **Major swing levels.** Big zigzag highs and lows (≥ 3 × ATRd reversals) count as levels even with one or two touches, and two of them at the same price form a double top or bottom. Added after Jeff's chart review: the 3-touch pivot rule missed DLTR's 2022 double top, AAP's April 2023 high and BA's August 2023 top.
 - **Centred pivot clustering.** Each swing point is tried as the centre of a zone that takes the points within 0.35 × ATRd of it. The old method swept up from the lowest price and split AAL's 8 swings at 13.78–14.16 into separate groups.
 - **One trendline per type.** Only the best line of each type is kept (falling resistance, broken rising support, channel rail). Otherwise the same swings produced a fan of near-duplicate lines.
+- **Entry engine refinements**, found by checking replay charts:
+  - A test needs price approaching from **below**. A level that price has held above for more than 3 bars has flipped to support.
+  - A rejection needs the spike to reach at least the zone's midpoint.
+  - FOCUS ends only when Vdif falls 0.5 × ATR5 below its start, which stops it switching on and off every minute.
+  - The add order lives 5 bars, and `confirmed_only` gives the lower high 20 bars to appear.
+- **A-level filter.** Prior-day highs/lows and round numbers add strength but are not A levels on their own. Merged zones are capped at 0.6 × ATRd (was 1.0), and double tops pair swings within 0.25 × ATRd.
 - **Strength defaults.** These are starting values: gap fill 3, gap entry 2, 200SMA 2, 52-week high 2, other moving averages and prior-day levels 1. Pivot strength = touches + 1 per 3 months of span (max 4) + 1 per high-volume touch (max 2).

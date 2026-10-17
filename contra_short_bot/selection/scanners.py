@@ -79,7 +79,7 @@ def open_scan(symbol: str, day, cfg: dict | None = None) -> dict:
 
 # ------------------------------------------------------------------ intraday
 
-def _at_completion(s5: pd.Series, minute_index: pd.DatetimeIndex) -> pd.Series:
+def at_completion(s5: pd.Series, minute_index: pd.DatetimeIndex) -> pd.Series:
     """Value of the last *completed* 5-minute bar at the close of each 1-minute bar.
     A 5-minute bar labelled L completes at L + 5 min; a 1-minute bar labelled t at t + 1 min."""
     done = s5.copy()
@@ -134,12 +134,12 @@ def intraday_scan(symbol: str, day, cfg: dict | None = None, spy_pct: pd.Series 
     d = w[is_today].copy()
     idx = d.index
     d["atr1"] = atr1[is_today]
-    d["atr5"] = _at_completion(atr5, idx)
+    d["atr5"] = at_completion(atr5, idx)
     d["vwap"] = session_vwap(d)
     d["vdif"] = d["close"] - d["vwap"]
     d["rvol"] = _rvol_so_far(w, today)
     d["sma20"], d["ema20"], d["rsi"] = sma20[is_today], ema20[is_today], rsi1[is_today]
-    d["vol5_ratio"] = _at_completion(vol5_ratio, idx)
+    d["vol5_ratio"] = at_completion(vol5_ratio, idx)
     after = idx.time >= _t(S["contra"]["start"])
 
     # New highs/lows of the day (1-minute) and of completed 5-minute bars.
@@ -178,9 +178,9 @@ def intraday_scan(symbol: str, day, cfg: dict | None = None, spy_pct: pd.Series 
     sma_dif = d["close"] - d["sma20"]
     need = q["sma_dif_atr1"] * d["atr1"] if q["normalized"] else q["dollar_sma_dif"]
     vol_ok = d["vol5_ratio"] >= q["vol5_mult"]
-    d["quickstrike_high"] = ((d["close"] > bbu1[is_today]) & (d["close"] > _at_completion(bbu5, idx))
+    d["quickstrike_high"] = ((d["close"] > bbu1[is_today]) & (d["close"] > at_completion(bbu5, idx))
                              & (sma_dif > need) & vol_ok)
-    d["quickstrike_low"] = ((d["close"] < bbl1[is_today]) & (d["close"] < _at_completion(bbl5, idx))
+    d["quickstrike_low"] = ((d["close"] < bbl1[is_today]) & (d["close"] < at_completion(bbl5, idx))
                             & (-sma_dif > need) & vol_ok)
 
     # SP Top Reversal [PARTIAL; thresholds INFERRED].
@@ -199,7 +199,7 @@ def intraday_scan(symbol: str, day, cfg: dict | None = None, spy_pct: pd.Series 
     # Consecutive Candles 5 Up [INFERRED: 5-minute candles].
     green5 = (b5["close"] > b5["open"]).astype(int)
     run5 = green5.groupby((green5 == 0).cumsum()).cumsum()
-    d["cons_up"] = _at_completion(run5, idx).fillna(0) >= S["cons_up_bars"]
+    d["cons_up"] = at_completion(run5, idx).fillna(0) >= S["cons_up_bars"]
 
     # Gap Up and Go Up / Gap Down and Go Down [DOCUMENTED].
     g = open_scan(symbol, day, cfg)
