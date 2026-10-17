@@ -8,7 +8,7 @@ from indicators.core import atr
 from levels.library import build_levels_from_daily
 from levels.model import Level, merge_levels
 from levels.pivots import find_pivots, swing_points
-from levels.structure import find_gaps
+from levels.structure import find_gaps, find_swings
 from levels.trendlines import find_trendlines, zigzag
 
 CFG = load_config()
@@ -123,3 +123,12 @@ def test_resample_aligns_to_open():
     r = resample(df, 5)
     assert list(r.index.strftime("%H:%M")) == ["09:30", "09:35"]
     assert r["high"].iloc[0] == 5 and r["volume"].iloc[1] == 5
+
+
+def test_double_top_becomes_a_swing_level():
+    seg = lambda a, b, n: np.linspace(a, b, n)
+    c = np.r_[seg(100, 150, 25), seg(150, 110, 25), seg(110, 150.5, 25), seg(150.5, 105, 25), seg(105, 115, 10)]
+    df = bars(c)
+    sw = find_swings(df, atr(df), CFG)
+    tops = [s for s in sw if "double top" in s.notes]
+    assert len(tops) == 1 and tops[0].zone_low < 151 < tops[0].zone_high and tops[0].strength == 4

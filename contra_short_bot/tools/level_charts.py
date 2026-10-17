@@ -5,7 +5,7 @@ visual check against TradingView before trusting any backtest (spec 11).
     python -m tools.level_charts --symbol NVDA --day 2025-04-21
 
 Each chart shows the ~250 sessions before the day with every merged level zone
-drawn across it and trendlines from their first anchor. The 20 sessions after
+within 6 x ATRd of the prior close drawn across it and trendlines from their first anchor. The 20 sessions after
 the day are drawn faded, so you can see whether price reacted at the levels.
 """
 from __future__ import annotations
@@ -39,7 +39,8 @@ def _candles(ax, df: pd.DataFrame, x0: int, alpha: float = 1.0) -> None:
     ax.bar(x, body_h, bottom=body_lo, width=0.7, color=col, alpha=alpha, linewidth=0)
 
 
-def chart(symbol: str, day: pd.Timestamp, out_dir, cfg: dict, before: int = 250, after: int = 20):
+def chart(symbol: str, day: pd.Timestamp, out_dir, cfg: dict, before: int = 250, after: int = 20,
+          span_atr: float = 6.0):
     daily = adjust_daily(daily_bars(symbol), symbol, day)
     dl = build_levels_from_daily(daily, symbol, day, cfg)
     hist = daily[daily.index < day].iloc[-before:]
@@ -58,6 +59,8 @@ def chart(symbol: str, day: pd.Timestamp, out_dir, cfg: dict, before: int = 250,
     for lv in dl.levels:
         if lv.zone_high < lo - pad or lv.zone_low > hi + pad:
             continue
+        if abs(lv.mid - dl.prior_close) > span_atr * dl.atr_d:
+            continue  # the bot only acts near price; far-away levels just clutter the chart
         c = COLORS.get(lv.kind, "#495057")
         ax.axhspan(lv.zone_low, lv.zone_high, color=c, alpha=0.18, linewidth=0)
         side = "R" if lv.zone_high > dl.prior_close else "S"

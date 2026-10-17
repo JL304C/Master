@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import pandas as pd
 
 # When zones merge, the kept `kind` is the highest-ranked one present.
-KIND_RANK = ["manual", "pivot", "trendline", "gap_fill", "gap_entry", "sma", "prior_high",
+KIND_RANK = ["manual", "pivot", "swing", "trendline", "gap_fill", "gap_entry", "sma", "prior_high",
              "premarket_high", "psych"]
 
 
@@ -64,7 +64,7 @@ def _combine(group: list[Level], sma_pivot_bonus: float, psych_bonus: float) -> 
     kinds = {g.kind for g in group}
     best = min(group, key=lambda g: (_rank(g.kind), -g.strength))
     strength = sum(g.strength for g in group)
-    if "sma" in kinds and ("pivot" in kinds or "manual" in kinds):
+    if "sma" in kinds and kinds & {"pivot", "manual", "swing"}:
         strength += sma_pivot_bonus
     if "psych" in kinds:
         strength += psych_bonus

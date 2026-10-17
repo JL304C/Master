@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 import pandas as pd
 import yaml
 
 from indicators.core import ema, sma
 from levels.model import Level
+from levels.trendlines import zigzag
 
 # [DEFAULT] base strengths for structure levels that have no touch count.
 STRENGTH = {"gap_fill": 3, "gap_entry": 2, "sma50": 1, "sma100": 1, "sma200": 2, "ema20": 1,
@@ -41,6 +44,33 @@ def find_gaps(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]:
         out.append(Level("gap_fill", fill - z, fill + z, STRENGTH["gap_fill"], 0, d, note, ["gap fill"]))
         if entry < fill - 2 * z:
             out.append(Level("gap_entry", entry - z, entry + z, STRENGTH["gap_entry"], 0, d, note, ["gap entry"]))
+    return out
+
+
+def find_swings(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]:
+    """Major swing highs and lows (the zigzag's >= 3 x ATRd reversals) as levels,
+    even with only one or two touches: an old major high (DLTR's 2022 double top)
+    or a single blow-off top (AAP April 2023) is a level a trader draws. Two major
+    swings at the same price make a double top/bottom and add their strength. [ADDED]"""
+    sc = cfg["levels"]["swing"]
+    a = float(atr_d.iloc[-1])
+    atr_pct = a / float(daily["close"].iloc[-1])
+    zz = zigzag(daily, atr_d, cfg["levels"]["trendline"]["zigzag_atr"])
+    out, used = [], set()
+    for j, (i, px, t) in enumerate(zz):
+        if j in used:
+            continue
+        twins = [k for k, (_, q, u) in enumerate(zz) if k != j and k not in used
+                 and abs(np.log(q / px)) <= np.log1p(sc["twin_atr"] * atr_pct)]
+        used.update([j, *twins])
+        group = [zz[k] for k in [j, *twins]]
+        prices = [g[1] for g in group]
+        pad = sc["zone_atr"] * atr_pct * px
+        kind = "double " if len(group) > 1 else ""
+        name = f"{kind}{'top' if t == 'H' else 'bottom'}" if kind else f"swing {'high' if t == 'H' else 'low'}"
+        dates = ", ".join(f"{daily.index[g[0]]:%Y-%m-%d}" for g in group)
+        out.append(Level("swing", min(prices) - pad, max(prices) + pad, sc["strength"] * len(group), len(group),
+                         daily.index[min(g[0] for g in group)], f"{name} {dates}", [name]))
     return out
 
 

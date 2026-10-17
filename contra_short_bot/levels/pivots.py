@@ -51,26 +51,21 @@ def find_pivots(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]
     pts["high_vol"] = pts["date"].map(hv).fillna(False).astype(bool)
     pts = pts.sort_values("price").reset_index(drop=True)
 
-    # Greedy clustering on price: a cluster spans at most cluster_atr x ATRd. Over a
-    # 500-day lookback the price can be far from today's, so the width is taken as a
-    # percentage of price (today's ATRd / today's close) rather than in dollars.
+    # Clustering: every swing point is tried as the centre of a zone, and the zone
+    # takes all points within cluster_atr x ATRd of it. Over a 500-day lookback the
+    # price can be far from today's, so the width is a percentage of price (today's
+    # ATRd / today's close) rather than dollars. Overlapping candidates are resolved
+    # below by keeping the strongest.
     atr_pct = a / float(daily["close"].iloc[-1])
     width = np.log1p(p["cluster_atr"] * atr_pct)
     logp = np.log(pts["price"].to_numpy(float))
-    clusters, cur = [], [0]
-    for i in range(1, len(pts)):
-        if logp[i] - logp[cur[0]] <= width:
-            cur.append(i)
-        else:
-            clusters.append(cur)
-            cur = [i]
-    clusters.append(cur)
+    clusters = {tuple(np.flatnonzero(np.abs(logp - x) <= width)) for x in logp}
 
     pos = {d: i for i, d in enumerate(daily.index)}
     hi_arr, lo_arr = daily["high"].to_numpy(), daily["low"].to_numpy()
     levels = []
     for idx in clusters:
-        c = pts.loc[idx].sort_values("date")
+        c = pts.loc[list(idx)].sort_values("date")
         level_px = float(c["price"].median())
         away = p["min_excursion_atr"] * atr_pct * level_px
         # A new touch counts only after price has moved at least `away` from the
@@ -94,7 +89,7 @@ def find_pivots(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]
         span = pos[touches[-1]["date"]] - pos[touches[0]["date"]]
         if span < p["min_span_days"]:
             continue
-        pad = p["zone_pad_atr"] * atr_pct * c["price"].mean()
+        pad = p["zone_pad_atr"] * atr_pct * level_px
         lo, hi = c["price"].min() - pad, c["price"].max() + pad
         months = span / 21
         hv_touches = int(c["high_vol"].sum())
@@ -109,7 +104,7 @@ def find_pivots(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]
     # isn't tiled with overlapping zones.
     keep: list[Level] = []
     sup = p["suppress_atr"] * atr_pct
-    for lv in sorted(levels, key=lambda x: (-x.strength, x.mid)):
+    for lv in sorted(levels, key=lambda x: (-x.strength, x.zone_high - x.zone_low, x.mid)):
         if all(abs(np.log(lv.mid / k.mid)) > sup for k in keep):
             keep.append(lv)
     return keep

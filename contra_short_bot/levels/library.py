@@ -11,7 +11,7 @@ from data.fetch import ROOT, load_config
 from indicators.core import atr
 from levels.model import Level, merge_levels
 from levels.pivots import find_pivots
-from levels.structure import find_gaps, find_mas, find_prior, find_psych, manual_levels
+from levels.structure import find_gaps, find_mas, find_prior, find_psych, find_swings, manual_levels
 from levels.trendlines import find_trendlines
 
 
@@ -51,6 +51,7 @@ def build_levels_from_daily(daily: pd.DataFrame, symbol: str, day: pd.Timestamp,
     raw: list[Level] = []
     raw += find_pivots(hist, a, cfg)
     raw += find_trendlines(hist, a, cfg)
+    raw += find_swings(hist, a, cfg)
     raw += find_gaps(hist, a, cfg)
     raw += find_mas(hist, a, cfg)
     raw += find_psych(hist, a, cfg)
