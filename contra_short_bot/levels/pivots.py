@@ -67,13 +67,26 @@ def find_pivots(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]
     clusters.append(cur)
 
     pos = {d: i for i, d in enumerate(daily.index)}
+    hi_arr, lo_arr = daily["high"].to_numpy(), daily["low"].to_numpy()
     levels = []
     for idx in clusters:
         c = pts.loc[idx].sort_values("date")
-        # A swing and a consolidation close a day or two apart are one touch.
+        level_px = float(c["price"].median())
+        away = p["min_excursion_atr"] * atr_pct * level_px
+        # A new touch counts only after price has moved at least `away` from the
+        # level since the previous touch. Swings inside the same chop are one touch.
         touches, last = [], None
         for _, r in c.iterrows():
-            if last is None or pos[r["date"]] - pos[last["date"]] > p["swing_bars"]:
+            if last is None:
+                touches.append(r)
+                last = r
+                continue
+            i0, i1 = pos[last["date"]], pos[r["date"]]
+            if i1 - i0 <= p["swing_bars"]:
+                continue
+            seg = slice(i0 + 1, i1)
+            moved = max(hi_arr[seg].max(initial=level_px) - level_px, level_px - lo_arr[seg].min(initial=level_px))
+            if moved >= away:
                 touches.append(r)
                 last = r
         if len(touches) < p["min_touches"]:
@@ -92,7 +105,14 @@ def find_pivots(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Level]
         if flip:
             notes += f"; {flip}"
         levels.append(Level("pivot", lo, hi, strength, len(touches), touches[0]["date"], notes, ["pivot"]))
-    return levels
+    # Within suppress_atr x ATRd only the strongest pivot is kept, so a choppy range
+    # isn't tiled with overlapping zones.
+    keep: list[Level] = []
+    sup = p["suppress_atr"] * atr_pct
+    for lv in sorted(levels, key=lambda x: (-x.strength, x.mid)):
+        if all(abs(np.log(lv.mid / k.mid)) > sup for k in keep):
+            keep.append(lv)
+    return keep
 
 
 def _last_flip(daily: pd.DataFrame, lo: float, hi: float, max_out: int) -> str:

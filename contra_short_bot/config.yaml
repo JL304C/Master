@@ -35,6 +35,8 @@ levels:
     high_volume_mult: 1.5      # touch-day volume >= 1.5 x 50-day average earns a bonus
     consolidation_days: 3      # closes at the end of a run of >= 3 tight days are candidates
     consolidation_atr: 0.5     # "tight" = the run's close range <= 0.5 x ATRd
+    min_excursion_atr: 1.5     # price must move 1.5 x ATRd away between touches [ADDED]
+    suppress_atr: 1.5          # only the strongest pivot within 1.5 x ATRd is kept [ADDED]
   trendline:
     zigzag_atr: 3.0            # major swings need a >= 3 x ATRd reversal
     touch_atr: 0.25            # third touch within 0.25 x ATRd validates the line

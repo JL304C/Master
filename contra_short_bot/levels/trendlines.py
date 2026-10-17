@@ -118,7 +118,15 @@ def find_trendlines(daily: pd.DataFrame, atr_d: pd.Series, cfg: dict) -> list[Le
                 span = np.arange(i0, n)
                 off = (h[span] - _value(i0, p0, i1, p1, span)).max()
                 out.append(_level("channel rail", daily, i0, p0 + off, i1, p1 + off, today, a, t, 2 + len(tch)))
-    return _dedupe([lv for lv in out if lv.zone_low > 0], a * t["zone_atr"] * 2)
+    out = [lv for lv in out if lv.zone_low > 0]
+    # Keep only the best line of each type (most touches, then most recent second
+    # anchor), so the same swings don't produce a fan of near-duplicate lines.
+    best: dict[str, Level] = {}
+    for lv in out:
+        k = lv.notes.split(" 20")[0]
+        if k not in best or (lv.touches, lv.line[5]) > (best[k].touches, best[k].line[5]):
+            best[k] = lv
+    return _dedupe(list(best.values()), a * t["zone_atr"] * 2)
 
 
 def _first_run(mask: np.ndarray, k: int) -> int | None:

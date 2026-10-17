@@ -5,6 +5,8 @@ splits.yaml already lists them.
 """
 from __future__ import annotations
 
+import yaml
+
 from data.bars import daily_bars, splits_for
 from data.fetch import ROOT, load_config
 
@@ -27,10 +29,14 @@ def main() -> None:
     cfg = load_config()
     syms = [p.stem for p in (ROOT / cfg["data"]["cache_dir"] / cfg["data"]["daily_dataset"]).glob("*.parquet")
             if not p.stem.endswith(".daily")]
+    not_splits = (yaml.safe_load((ROOT / "splits.yaml").read_text()) or {}).get("_not_splits", {})
     bad = 0
     for s in sorted(syms):
         known = {d.date(): r for d, r in splits_for(s)}
+        ignore = {str(d) for d in not_splits.get(s, [])}
         for day, target, x in candidates(s):
+            if f"{day:%Y-%m-%d}" in ignore:
+                continue
             ok = day.date() in known and abs(known[day.date()] / target - 1) < 0.01
             bad += not ok
             print(f"{s:6s} {day:%Y-%m-%d} looks like {target:g}-for-1 (prev close/open = {x:.3f})  "

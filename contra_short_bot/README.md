@@ -40,4 +40,6 @@ Each one is marked in `config.yaml`.
 - **Price-scaled pivot clustering.** Pivot clustering uses today's ATR as a **percentage** of price, not dollars. Over 500 days a stock can trade at very different prices.
 - **Zone width cap.** A merged zone may be at most 1 × ATRd wide. Without the cap, nearby levels chained into bands 5 ATR wide.
 - **Broken-support expiry.** A broken rising-support trendline only counts as a retest level for 60 sessions after the break. Older lines get projected far above price.
+- **Pivot touches must be separated by a real move.** A new touch only counts after price has moved at least 1.5 × ATRd away from the level. Only the strongest pivot within 1.5 × ATRd is kept. Without these rules, choppy ranges were tiled with overlapping pivots.
+- **One trendline per type.** Only the best line of each type is kept (falling resistance, broken rising support, channel rail). Otherwise the same swings produced a fan of near-duplicate lines.
 - **Strength defaults.** These are starting values: gap fill 3, gap entry 2, 200SMA 2, 52-week high 2, other moving averages and prior-day levels 1. Pivot strength = touches + 1 per 3 months of span (max 4) + 1 per high-volume touch (max 2).

@@ -64,10 +64,13 @@ def chart(symbol: str, day: pd.Timestamp, out_dir, cfg: dict, before: int = 250,
         ax.text(xr + 0.5, lv.mid, f"{side} {lv.label()}  s={lv.strength:g}", color=c, fontsize=7.5, va="center")
     for lv in dl.raw:
         if lv.kind == "trendline" and lv.line:
-            d0, p0, d1, p1, i0, i1 = lv.line
+            d0, p0, d1, p1, _, _ = lv.line
+            i0, i1 = pos[d0], pos[d1]  # positions in the full daily index
             xs = np.array([max(i0, first), pos[hist.index[-1]] + 1 + len(fut)])
             ys = p0 + (p1 - p0) * (xs - i0) / (i1 - i0)
             ax.plot(xs - first, ys, color=COLORS["trendline"], linewidth=1, alpha=0.8)
+            if "channel" in lv.notes:
+                continue  # a rail is shifted up from its anchors, so no anchor dots
             for d, p in ((d0, p0), (d1, p1)):
                 if d in pos and pos[d] >= first:
                     ax.plot(pos[d] - first, p, "o", color=COLORS["trendline"], markersize=3)

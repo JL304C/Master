@@ -12,5 +12,11 @@ GOOGL: [{date: "2022-07-18", ratio: 20}]
 AVGO: [{date: "2024-07-15", ratio: 10}]
 SMCI: [{date: "2024-10-01", ratio: 10}]
 ISRG: [{date: "2021-10-05", ratio: 3}]
-CSX: [{date: "2021-06-28", ratio: 3}]
+CSX: [{date: "2021-06-29", ratio: 3}]
 NFLX: [{date: "2025-11-17", ratio: 10}]
+SMH: [{date: "2023-05-05", ratio: 2}]
+
+# Overnight jumps check_splits flags that are NOT splits.
+_not_splits:
+  SRPT: ["2021-01-08"]   # trial-result crash, -50%
+  SMCI: ["2020-01-14"]   # relisted on Nasdaq; previous bar is from before the 2018 delisting
