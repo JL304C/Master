@@ -30,3 +30,19 @@ def session_vwap(df: pd.DataFrame) -> pd.Series:
     pv = (tp * df["volume"]).groupby(day).cumsum()
     v = df["volume"].groupby(day).cumsum()
     return pv / v.replace(0, np.nan)
+
+
+def bollinger_upper(s: pd.Series, n: int = 20, k: float = 2.0) -> pd.Series:
+    return sma(s, n) + k * s.rolling(n, min_periods=n).std(ddof=0)
+
+
+def bollinger_lower(s: pd.Series, n: int = 20, k: float = 2.0) -> pd.Series:
+    return sma(s, n) - k * s.rolling(n, min_periods=n).std(ddof=0)
+
+
+def rsi(s: pd.Series, n: int = 14) -> pd.Series:
+    """Wilder's RSI."""
+    d = s.diff()
+    up = d.clip(lower=0).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    dn = (-d.clip(upper=0)).ewm(alpha=1 / n, adjust=False, min_periods=n).mean()
+    return 100 - 100 / (1 + up / dn.replace(0, np.nan))

@@ -6,8 +6,8 @@ An intraday short-selling bot built from `STRATEGY_SPEC.md` (Mike Herman / Warri
 | Step (spec §1) | State |
 |---|---|
 | 1. Data layer: Databento 1-minute bars, daily and 2/5-minute aggregation, split adjustment | done |
-| 2. Daily level library (pivots, trendlines, gaps, moving averages, round numbers, prior/52-week highs, manual levels), unit tests, level charts | done, **waiting for Jeff's visual check** |
-| 2b. Stock selection (market tone, scanners, watchlist, prep sheet) | not started |
+| 2. Daily level library (pivots, major swings, trendlines, gaps, moving averages, round numbers, prior/52-week highs, manual levels), unit tests, level charts | done, reviewed against TradingView |
+| 2b. Stock selection: market tone, scanners, Daily Watchlist, prep sheet | done |
 | 3. Rejection Engine and strategies A–D | not started |
 | 4. Trade Manager, risk, backtester | not started |
 | 5. Backtest report | not started |
@@ -16,13 +16,20 @@ An intraday short-selling bot built from `STRATEGY_SPEC.md` (Mike Herman / Warri
 ## Data
 | Use | Dataset | From | Why |
 |---|---|---|---|
-| Intraday bars (signals, VWAP, volume) | `EQUS.MINI` 1-minute | 2023-03-28 | Consolidated tape, so volume and VWAP are the real totals |
-| Daily bars (levels) | `XNAS.ITCH` 1-minute, regular session only | 2018-05-01 | Long history for the 500-day lookback. Nasdaq-exchange trades only, so prices are fine but volume is a fraction of the total |
+| Intraday 1-minute bars, premarket included, and daily bars for levels | `XNAS.ITCH` | 2018-05-01 | Nasdaq-exchange trades: about 9-21% of each stock's total volume, depending on the stock. Prices, VWAP and volume *ratios* (RVOL, volume spikes) track the full tape |
+| Official daily volume | `EQUS.SUMMARY` | 2024-07-01 | Only used to measure each stock's Nasdaq share, so share-count thresholds (e.g. "premarket volume > 10,000") can be scaled |
 
-The universe is the favorites list (`watchlist.yaml`), plus SPY, QQQ, IWM, DIA and SMH.
+`EQUS.MINI` was tried first and dropped. Despite its name it holds only ~3% of volume and almost no premarket.
 
-- **Splits:** Databento bars are not split-adjusted. `splits.yaml` lists the splits. On each day, levels are built using only splits whose ex-date has already passed. `python -m tools.check_splits` flags price jumps that look like a split missing from the list.
+The universe is the favorites list (`watchlist.yaml`), plus SPY, QQQ, IWM, DIA and SMH. Live trading will use Alpaca's SIP feed, which has full volume.
+
+- **Splits:** Databento bars are not split-adjusted. `splits.yaml` lists the splits. On each day, levels and intraday warm-up bars use only splits whose ex-date has already passed. `python -m tools.check_splits` flags price jumps that look like a split missing from the list.
 - **Ticker changes** (META was FB until 2022-06-09) are mapped in `config.yaml`.
+
+## Stock selection (spec 6)
+- `selection/market_tone.py`: premarket tone (gap, location and premarket trend of SPY/QQQ/IWM/DIA, weighted), live tone (price vs session VWAP), the QQQ/IWM divergence rule, and the tone → strategy policy table.
+- `selection/scanners.py`: Pre Market Bid Up / Ask Down 3.5%, new premarket highs and lows, Gap Up / Down Static, Contra Short and Contra Long (dollar or ATR-normalized Vdif tiers), Quickstrike High and Low, SP Top Reversal, Para Up, 5 green candles, Gap Up and Go Up / Gap Down and Go Down, gap reversal, Trendsell, and relative weakness vs SPY. Each row uses only bars completed by the end of that minute.
+- `selection/watchlist.py`: the 09:25 Daily Watchlist with rank, reasons and focus stocks, plus the prep sheet in Mike's format. Run `python -m selection.watchlist --day 2024-03-08 --hits` to also list that session's scanner prints, including which Contra Short prints were at a level.
 
 ## Commands
 ```
@@ -32,6 +39,7 @@ python -m pytest -q tests
 python -m tools.check_splits
 python -m tools.level_charts --n 20          # charts + levels table -> reports/levels/
 python -m tools.level_charts --symbol NVDA --day 2025-08-20
+python -m selection.watchlist --day 2024-03-08 --hits   # prep sheet -> reports/prep/
 ```
 
 ## Choices made beyond the spec

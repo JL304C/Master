@@ -1,7 +1,7 @@
 """Download Databento 1-minute bars and cache them as one parquet file per symbol.
 
-    python -m data.fetch                 # favorites + index proxies, both datasets
-    python -m data.fetch --symbols NVDA TSLA --dataset EQUS.MINI
+    python -m data.fetch                 # favorites + index proxies, all datasets
+    python -m data.fetch --symbols NVDA TSLA --dataset XNAS.ITCH
 
 Bars are stored with an America/New_York timestamp index (bar open time) and
 columns open, high, low, close, volume. Re-running only fetches days after the
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from functools import lru_cache
 from pathlib import Path
 
 import databento as db
@@ -21,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ET = "America/New_York"
 
 
+@lru_cache(maxsize=1)
 def load_config() -> dict:
     return yaml.safe_load((ROOT / "config.yaml").read_text())
 
@@ -82,20 +84,36 @@ def fetch(dataset: str, symbols: list[str], start: str, end: str, cfg: dict) -> 
         print(f"{dataset} {sym}: {len(out):,} bars {out.index.min():%Y-%m-%d} .. {out.index.max():%Y-%m-%d}")
 
 
+def fetch_summary(symbols: list[str], end: str, cfg: dict) -> None:
+    """Official consolidated daily bars (EQUS.SUMMARY, from 2024-07). Used only to
+    measure each stock's Nasdaq share of total volume, so share-count thresholds
+    written for the full tape can be scaled to the Nasdaq-only intraday data."""
+    d = cfg["data"]
+    path = ROOT / d["cache_dir"] / d["summary_dataset"] / "daily.parquet"
+    data = _client().timeseries.get_range(dataset=d["summary_dataset"], schema="ohlcv-1d", symbols=symbols,
+                                          start=d["summary_start"], end=end)
+    df = data.to_df()[["symbol", "open", "high", "low", "close", "volume"]]
+    df.index = df.index.tz_convert("UTC").tz_localize(None).normalize()
+    df.index.name = "date"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path)
+    print(f"{d['summary_dataset']}: {len(df):,} daily bars for {df['symbol'].nunique()} symbols")
+
+
 def main() -> None:
     cfg = load_config()
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbols", nargs="*")
-    ap.add_argument("--dataset", choices=["both", cfg["data"]["intraday_dataset"], cfg["data"]["daily_dataset"]],
-                    default="both")
+    ap.add_argument("--dataset", choices=["all", cfg["data"]["intraday_dataset"], cfg["data"]["summary_dataset"]],
+                    default="all")
     ap.add_argument("--end", default=pd.Timestamp.now(tz="UTC").strftime("%Y-%m-%d"))
     args = ap.parse_args()
     symbols = args.symbols or default_symbols(cfg)
     d = cfg["data"]
-    if args.dataset in ("both", d["daily_dataset"]):
-        fetch(d["daily_dataset"], symbols, d["daily_start"], args.end, cfg)
-    if args.dataset in ("both", d["intraday_dataset"]):
+    if args.dataset in ("all", d["intraday_dataset"]):
         fetch(d["intraday_dataset"], symbols, d["intraday_start"], args.end, cfg)
+    if args.dataset in ("all", d["summary_dataset"]):
+        fetch_summary(symbols, args.end, cfg)
 
 
 if __name__ == "__main__":

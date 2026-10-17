@@ -6,13 +6,19 @@ account:
 
 data:
   cache_dir: cache
-  # Consolidated tape (all venues): 1-minute bars from 2023-03-28.
-  intraday_dataset: EQUS.MINI
-  intraday_start: "2023-03-28"
-  # Nasdaq-exchange trades only, but goes back to 2018-05. Used to build
-  # regular-session daily bars for the level library (prices only matter there).
+  # Nasdaq-exchange trades (TotalView-ITCH), 1-minute bars from 2018-05 incl. premarket.
+  # About 20% of total volume: prices, VWAP and volume *ratios* track the full tape;
+  # absolute share counts are scaled by each stock's Nasdaq share (below).
+  # Daily bars for the level library are built from the same data.
+  # (EQUS.MINI was tried first: it holds only ~3% of volume and almost no premarket.)
+  intraday_dataset: XNAS.ITCH
+  intraday_start: "2018-05-01"
   daily_dataset: XNAS.ITCH
   daily_start: "2018-05-01"
+  # Official consolidated daily bars (from 2024-07), only to measure Nasdaq's share of volume.
+  summary_dataset: EQUS.SUMMARY
+  summary_start: "2024-07-01"
+  default_nasdaq_share: 0.2
   # Live session bars: Alpaca SIP stream (Algo Trader Plus). Subscribing to bars for
   # "*" gives every US stock, which the Contra / relative-weakness scanners need.
   live_feed: alpaca_sip
@@ -65,3 +71,61 @@ levels:
   merge_atr: 0.5               # zones closer than 0.5 x ATRd merge
   merge_max_width_atr: 1.0     # ...but a merged zone stays <= 1 x ATRd wide [ADDED]
   max_open_above_atr: 3.0      # skip a level if today's open is > 3 x ATRd above it
+
+selection:
+  # 6.1 market tone
+  tone:
+    premarket_from: "08:00"
+    final_at: "09:25"
+    gap_atr: 0.3               # proxy gap beyond +-0.3 x ATRd scores +-1
+    trend_points: 0.5          # premarket last vs premarket VWAP scores +-0.5
+    labels: {weak: -0.75, soft: -0.25, firm: 0.25, strong: 0.75}   # NEUTRAL in between
+    live_every_min: 5
+  # Tone -> what each strategy group may do (spec 6.1 table). Every cell is a test.
+  tone_policy:
+    WEAK:    {fade: true,  fade_min_strength_pct: 0,  fade_needs_climax: false, trend: true,  trend_needs_rel_weak: false, size: 1.0}
+    SOFT:    {fade: true,  fade_min_strength_pct: 0,  fade_needs_climax: false, trend: true,  trend_needs_rel_weak: false, size: 1.0}
+    NEUTRAL: {fade: true,  fade_min_strength_pct: 0,  fade_needs_climax: false, trend: true,  trend_needs_rel_weak: true,  size: 1.0}
+    FIRM:    {fade: true,  fade_min_strength_pct: 70, fade_needs_climax: false, trend: false, trend_needs_rel_weak: false, size: 0.5}
+    STRONG:  {fade: true,  fade_min_strength_pct: 90, fade_needs_climax: true,  trend: false, trend_needs_rel_weak: false, size: 0.5}
+
+  # 6.2 scanners. Share-count thresholds are for the full tape; they are scaled by
+  # each stock's Nasdaq share of volume before use.
+  premarket:
+    from: "04:00"
+    move_pct: 0.035            # Bid Up / Ask Down 3.5%
+    min_volume: 10000
+    new_high_lookback_min: 5   # "new premarket high" = made in the last 5 minutes
+  gap_static_pct: 0.01         # Gap Up/Down Static: open/prior close >= 1.01 (or <= 0.99) and beyond prior high/low
+  contra:
+    trigger: new_day_high      # new_day_high | new_5m_high
+    mode: normalized           # dollar | normalized | both
+    dollar_tiers: [1.0, 2.0, 3.0]
+    atr5_tiers: [1.5, 2.5, 3.5]
+    min_pct_of_price: 0.01
+    min_rvol: 1.5
+    start: "09:31"
+    requires_level: true
+    level_atr5: 1.0            # a level within 1 x ATR5 above counts
+  quickstrike:
+    bb_period: 20
+    bb_k: 2.0
+    dollar_sma_dif: 0.50
+    sma_dif_atr1: 1.0          # normalized version of the $0.50
+    vol5_mult: 1.5
+    normalized: true
+  sp_top_reversal: {rsi: 90, vol5_mult: 2.0, ema20_dist_atr1: 1.5}
+  para_up: {bars: 4, move_atr1: 3.0}
+  cons_up_bars: 5
+  rel_weak: {vs_spy_pct: -0.02, min_rvol: 1.5}
+  level_proximity_atr: 2.0     # within 2 x ATRd below an active resistance
+  rvol_lookback_days: 20
+
+  # 6.4 Daily Watchlist
+  watchlist:
+    size: 20
+    max_streamed: 40
+    focus_count: 5
+    focus_bonus: 3
+    focus_resistance_atr: 1.0
+    drop_after_idle_min: 60
