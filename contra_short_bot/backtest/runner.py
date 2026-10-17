@@ -209,9 +209,20 @@ def run_day(day, cfg: dict | None = None, symbols: list[str] | None = None, keep
 
 # ------------------------------------------------------------------ driver
 
+def _deep_update(d: dict, u: dict) -> None:
+    for k, v in u.items():
+        if isinstance(v, dict) and isinstance(d.get(k), dict):
+            _deep_update(d[k], v)
+        else:
+            d[k] = v
+
+
 def _run_chunk(args):
-    days, cfg_path = args
+    days, overrides = args
     cfg = load_config()
+    # load_config() is cached and returns one shared dict, so updating it in place
+    # applies a variant's settings everywhere in this worker process.
+    _deep_update(cfg, overrides or {})
     out, logs = [], []
     for d in days:
         try:
@@ -241,25 +252,31 @@ def apply_weekly_limit(trades: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     return t.loc[keep].drop(columns="week")
 
 
-def run(start: str, end: str, workers: int = 4, name: str = "base", cfg: dict | None = None) -> pd.DataFrame:
-    cfg = cfg or load_config()
-    days = [d for d in sessions("SPY") if pd.Timestamp(start) <= d <= pd.Timestamp(end)]
+def run(start: str, end: str, workers: int = 4, name: str = "base", overrides: dict | None = None,
+        every: int = 1, split_at: str | None = None) -> pd.DataFrame:
+    """`overrides`: nested config changes for this run. `every`: use every n-th
+    session (for quicker comparison runs). `split_at`: first out-of-sample date
+    (default: 60% of the sessions)."""
+    cfg = load_config()
+    _deep_update(cfg, overrides or {})
+    all_days = [d for d in sessions("SPY") if pd.Timestamp(start) <= d <= pd.Timestamp(end)]
+    days = all_days[::every]
     n = max(1, workers)
     chunks = [days[k::n] for k in range(n)]   # interleaved: every worker sees every era
     t0 = _time.time()
     with mp.get_context("spawn").Pool(n) as pool:
-        res = pool.map(_run_chunk, [(c, None) for c in chunks])
+        res = pool.map(_run_chunk, [(c, overrides) for c in chunks])
     trades = pd.concat([r[0] for r in res if len(r[0])], ignore_index=True) if any(len(r[0]) for r in res) else pd.DataFrame()
     trades = apply_weekly_limit(trades, cfg)
     out = ROOT / "reports" / "backtest" / name
     out.mkdir(parents=True, exist_ok=True)
-    split = days[int(len(days) * 0.6)] if days else None
+    split = pd.Timestamp(split_at) if split_at else (all_days[int(len(all_days) * 0.6)] if all_days else None)
     if len(trades):
         trades["sample"] = np.where(pd.to_datetime(trades["date"]) < split, "in-sample", "out-of-sample")
         trades.sort_values("entry_time").to_csv(out / "trades.csv", index=False)
     (out / "log.txt").write_text("\n\n".join(l for r in res for l in r[1]))
     (out / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-    meta = {"start": start, "end": end, "days": len(days), "in_sample_until": str(split.date()) if split else None,
+    meta = {"start": start, "end": end, "days": len(days), "every": every, "overrides": overrides or {}, "in_sample_until": str(split.date()) if split else None,
             "trades": len(trades), "seconds": round(_time.time() - t0)}
     (out / "run.json").write_text(json.dumps(meta, indent=2))
     errors = [l for r in res for l in r[1] if " ERROR " in l]
