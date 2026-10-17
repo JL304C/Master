@@ -1,0 +1,88 @@
+"""Load cached 1-minute bars, build daily and N-minute bars, apply split adjustments."""
+from __future__ import annotations
+
+from datetime import time
+from functools import lru_cache
+from pathlib import Path
+
+import pandas as pd
+import yaml
+
+from data.fetch import ROOT, cache_path, load_config
+
+RTH_START, RTH_END = time(9, 30), time(16, 0)
+PRE_START = time(4, 0)
+
+
+def load_minutes(symbol: str, dataset: str | None = None, cfg: dict | None = None) -> pd.DataFrame:
+    cfg = cfg or load_config()
+    dataset = dataset or cfg["data"]["intraday_dataset"]
+    return pd.read_parquet(cache_path(cfg, dataset, symbol))
+
+
+def rth(df: pd.DataFrame) -> pd.DataFrame:
+    t = df.index.time
+    return df[(t >= RTH_START) & (t < RTH_END)]
+
+
+def premarket(df: pd.DataFrame) -> pd.DataFrame:
+    t = df.index.time
+    return df[(t >= PRE_START) & (t < RTH_START)]
+
+
+def daily_from_minutes(df: pd.DataFrame) -> pd.DataFrame:
+    """Regular-session daily bars, indexed by session date (tz-naive)."""
+    m = rth(df)
+    g = m.groupby(m.index.date)
+    out = pd.DataFrame({
+        "open": g["open"].first(), "high": g["high"].max(), "low": g["low"].min(),
+        "close": g["close"].last(), "volume": g["volume"].sum(),
+    })
+    out.index = pd.DatetimeIndex(out.index, name="date")
+    # Drop sessions with almost no trading (data glitches, single prints).
+    return out[g.size().values >= 30]
+
+
+def resample(df: pd.DataFrame, minutes: int) -> pd.DataFrame:
+    """Aggregate 1-minute bars to N-minute bars aligned to the 09:30 open, within each session."""
+    if minutes == 1:
+        return df
+    origin = "start_day"
+    off = pd.Timedelta(minutes=(9 * 60 + 30) % minutes)
+    r = df.resample(f"{minutes}min", origin=origin, offset=off, label="left", closed="left")
+    out = r.agg({"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"})
+    return out.dropna(subset=["open"])
+
+
+@lru_cache(maxsize=1)
+def _splits() -> dict:
+    p = ROOT / "splits.yaml"
+    return yaml.safe_load(p.read_text()) or {} if p.exists() else {}
+
+
+def splits_for(symbol: str) -> list[tuple[pd.Timestamp, float]]:
+    return [(pd.Timestamp(s["date"]), float(s["ratio"])) for s in _splits().get(symbol, [])]
+
+
+def adjust_daily(daily: pd.DataFrame, symbol: str, asof: pd.Timestamp) -> pd.DataFrame:
+    """Put every bar on the share basis in force on `asof`, using only splits with ex-date <= asof."""
+    out = daily.copy()
+    for ex, ratio in splits_for(symbol):
+        if ex <= asof:
+            before = out.index < ex
+            out.loc[before, ["open", "high", "low", "close"]] /= ratio
+            out.loc[before, "volume"] = (out.loc[before, "volume"] * ratio).round()
+    return out
+
+
+@lru_cache(maxsize=64)
+def daily_bars(symbol: str) -> pd.DataFrame:
+    """Unadjusted regular-session daily bars from the long-history dataset, cached to disk."""
+    cfg = load_config()
+    src = cache_path(cfg, cfg["data"]["daily_dataset"], symbol)
+    dst = Path(str(src).replace(".parquet", ".daily.parquet"))
+    if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+        return pd.read_parquet(dst)
+    d = daily_from_minutes(pd.read_parquet(src))
+    d.to_parquet(dst)
+    return d

@@ -1,0 +1,58 @@
+# Contrarian short-selling bot. Values marked [DEFAULT] in STRATEGY_SPEC.md are
+# starting points to test, not settled facts.
+
+account:
+  equity: 1000000            # Alpaca paper account #3
+
+data:
+  cache_dir: cache
+  # Consolidated tape (all venues): 1-minute bars from 2023-03-28.
+  intraday_dataset: EQUS.MINI
+  intraday_start: "2023-03-28"
+  # Nasdaq-exchange trades only, but goes back to 2018-05. Used to build
+  # regular-session daily bars for the level library (prices only matter there).
+  daily_dataset: XNAS.ITCH
+  daily_start: "2018-05-01"
+  index_proxies: {SPY: 1.0, QQQ: 1.0, IWM: 0.5, DIA: 0.5}
+  extra_symbols: [SMH]
+  # Ticker changes: the old ticker is used for dates before `until`.
+  symbol_history:
+    META: [{symbol: FB, until: "2022-06-09"}]
+
+levels:
+  lookback_days: 500
+  atr_period: 14
+  pivot:
+    swing_bars: 3              # swing high/low = beyond 3 bars on each side
+    cluster_atr: 0.35          # points within 0.35 x ATRd cluster together
+    min_touches: 3
+    min_span_days: 10
+    zone_pad_atr: 0.10
+    max_days_outside: 2        # closes beyond the zone for more than 2 days -> flips role
+    high_volume_mult: 1.5      # touch-day volume >= 1.5 x 50-day average earns a bonus
+    consolidation_days: 3      # closes at the end of a run of >= 3 tight days are candidates
+    consolidation_atr: 0.5     # "tight" = the run's close range <= 0.5 x ATRd
+  trendline:
+    zigzag_atr: 3.0            # major swings need a >= 3 x ATRd reversal
+    touch_atr: 0.25            # third touch within 0.25 x ATRd validates the line
+    zone_atr: 0.15
+    broken_days: 2             # rising support closed below for 2+ days = broken
+    broken_retest_days: 60     # a broken support line is only a retest level for 60 sessions [ADDED]
+    max_age_days: 250          # ignore lines whose second anchor is older than this
+  gap:
+    min_atr: 2.0
+    min_pct: 0.04
+    zone_atr: 0.15
+  ma:
+    sma: [50, 100, 200]
+    ema: [20]
+    zone_atr: 0.10
+    pivot_overlap_bonus: 2
+  psych:
+    zone_atr: 0.10
+    strength: 1
+    confluence_bonus: 1
+  manual_strength: 5
+  merge_atr: 0.5               # zones closer than 0.5 x ATRd merge
+  merge_max_width_atr: 1.0     # ...but a merged zone stays <= 1 x ATRd wide [ADDED]
+  max_open_above_atr: 3.0      # skip a level if today's open is > 3 x ATRd above it

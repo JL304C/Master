@@ -1,0 +1,30 @@
+favorites:
+  # from the course's chart examples
+  - NVDA
+  - TSLA
+  - AAPL
+  - NFLX
+  - MU
+  - MO
+  - DLTR
+  - SRPT
+  - STX
+  - URI
+  - AAL
+  - QCOM
+  - EBAY
+  - CSX
+  - BIDU
+  - ISRG
+  - AAP
+  # liquid large caps often "in play"
+  - AMD
+  - META
+  - AMZN
+  - GOOGL
+  - MSFT
+  - AVGO
+  - SMCI
+  - COIN
+  - BA
+notes: "Edit freely. Add or remove symbols; the bot reloads this file each morning."

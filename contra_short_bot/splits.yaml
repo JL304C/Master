@@ -1,0 +1,16 @@
+# Stock splits since 2018 for symbols we hold data for. Databento bars are not
+# split-adjusted, so daily levels are rebuilt on each day's share basis using only
+# splits whose ex-date is on or before that day.
+# ratio = new shares per old share (4 means 4-for-1; 0.1 means 1-for-10 reverse).
+# `python -m tools.check_splits` flags overnight price jumps that look like a
+# split missing from this list.
+AAPL: [{date: "2020-08-31", ratio: 4}]
+TSLA: [{date: "2020-08-31", ratio: 5}, {date: "2022-08-25", ratio: 3}]
+NVDA: [{date: "2021-07-20", ratio: 4}, {date: "2024-06-10", ratio: 10}]
+AMZN: [{date: "2022-06-06", ratio: 20}]
+GOOGL: [{date: "2022-07-18", ratio: 20}]
+AVGO: [{date: "2024-07-15", ratio: 10}]
+SMCI: [{date: "2024-10-01", ratio: 10}]
+ISRG: [{date: "2021-10-05", ratio: 3}]
+CSX: [{date: "2021-06-28", ratio: 3}]
+NFLX: [{date: "2025-11-17", ratio: 10}]

@@ -1,0 +1,4 @@
+# Jeff's own levels, treated as a pivot with strength 5 (spec 3.5).
+# Ranges are written as "low-high" strings; single prices get the usual 0.1 x ATRd band.
+# 2026-10-19:
+#   TSLA: {resistance: [303.4, "317-318"], support: [300, 290.75]}
